@@ -3,6 +3,7 @@ name = "uu-compat"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository = "https://github.com/TheRainstorm/uu-client-plugins"
 description = "Optional UU account, rendezvous and compatible session plugin"
 
 [features]

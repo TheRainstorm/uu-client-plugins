@@ -1,0 +1,13 @@
+/target/
+/handoff/
+/notes/
+__pycache__/
+*.pyc
+**/state.json
+**/state.json.*
+**/signing-key*
+.env
+.env.*
+*.eclipse-invite.json
+gui-settings*.json
+uu-session-*.jsonl
