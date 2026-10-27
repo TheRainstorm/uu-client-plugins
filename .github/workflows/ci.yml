@@ -28,7 +28,7 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install --no-install-recommends -y build-essential pkg-config cmake nasm libasound2-dev libpulse-dev
+          sudo apt-get install --no-install-recommends -y build-essential pkg-config cmake nasm libasound2-dev libpulse-dev libwayland-dev libxkbcommon-dev libpipewire-0.3-dev libclang-dev
           rustup toolchain install 1.95.0 --profile minimal --no-self-update
           rustup default 1.95.0
       - name: Validate plugin against the pinned SDK
