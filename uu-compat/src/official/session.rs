@@ -26,6 +26,33 @@ struct Clipboard(Option<Arc<uu_core::clipboard::Clipboard>>);
 impl Drop for Clipboard {
     fn drop(&mut self){if let Some(c)=&self.0 {uu_core::plugin_backend::stop_clipboard(c);}}
 }
+struct AudioTask {stop:watch::Sender<bool>,task:Option<tokio::task::JoinHandle<Result<()>>>}
+impl AudioTask {
+    fn start(kind:uu_media::audio_capture::Source,mut sender:OpusSender)->Result<Self>{
+        let mut worker=AudioCapture::start(kind)?;let(stop,mut receiver)=watch::channel(false);
+        let task=tokio::spawn(async move {
+            let result=async {loop {tokio::select! {
+                _=stopped(&mut receiver)=>break,
+                frame=worker.next()=>{
+                    let frame=frame.context("official audio capture ended")?;
+                    timeout(Duration::from_secs(2),sender.send(frame)).await.context("official audio send timed out")??;
+                }
+            }}Ok(())}.await;
+            worker.stop().await;result
+        });
+        Ok(Self{stop,task:Some(task)})
+    }
+    async fn stop(&mut self)->Result<()>{
+        self.stop.send_replace(true);
+        if let Some(mut task)=self.task.take(){
+            match timeout(Duration::from_secs(3),&mut task).await {
+                Ok(result)=>result.context("official audio worker failed")??,
+                Err(_)=>{task.abort();let _=task.await;anyhow::bail!("official audio cleanup timed out");}
+            }
+        }Ok(())
+    }
+}
+impl Drop for AudioTask {fn drop(&mut self){self.stop.send_replace(true);}}
 async fn stopped(receiver:&mut watch::Receiver<bool>) {
     loop {if *receiver.borrow_and_update(){return;}if receiver.changed().await.is_err(){return;}}
 }
@@ -98,6 +125,7 @@ impl Session {
             })
         }));
         let mut capture=None;let mut input=None;
+        let mut audio:Option<AudioTask>=None;
         let clipboard=Clipboard(None);
         let mut clipboard=clipboard;
         let mut tasks=tokio::task::JoinSet::<Result<()>>::new();
@@ -211,6 +239,7 @@ impl Session {
                     }},
                     _=tick.tick()=>{
                         let state=pc.connection_state();
+                        ensure!(audio.as_ref().is_none_or(|a|!a.task.as_ref().is_some_and(|t|t.is_finished())),"official audio worker stopped");
                         ensure!(!matches!(state,RTCPeerConnectionState::Failed|RTCPeerConnectionState::Closed|RTCPeerConnectionState::Disconnected),"official peer disconnected");
                         ensure!(streaming||Instant::now()<deadline,"official media initialization timed out");
                         ensure!(pending_update.as_ref().is_none_or(|(_,_,at,_)|at.elapsed()<Duration::from_secs(3)),"official capture update timed out");
@@ -224,8 +253,7 @@ impl Session {
                         if !streaming&&ready&&state==RTCPeerConnectionState::Connected {
                             streaming=true;source.request_keyframe();
                             if let (Some(kind),Some(mut sender))=(audio_source,audio_sender.take()) {
-                                let mut worker=AudioCapture::start(kind)?;
-                                tasks.spawn(async move{while let Some(frame)=worker.next().await {if let Err(error)=sender.send(frame).await {worker.stop().await;return Err(error);}}worker.stop().await;Ok(())});
+                                audio=Some(AudioTask::start(kind,sender)?);
                             }
                             let status=uu_core::native::HostStatus::Streaming {width:shape.width,height:shape.height,fps:shape.fps,audio:if audio_source.is_some(){"Opus"}else{"disabled"}.into(),encoder:source.backend()};
                             lease.progress(status.clone());context.progress.send_replace(status);
@@ -248,12 +276,13 @@ impl Session {
         }.await;
         if let Some(input)=&input {input.request(false);input.stop().await;}
         drop(clipboard);
+        let audio_result=if let Some(audio)=&mut audio {audio.stop().await}else{Ok(())};
         let _=timeout(Duration::from_secs(1),pc.close()).await;
         tasks.abort_all();while tasks.join_next().await.is_some(){}
         let mut report=capture.as_ref().map_or_else(Default::default,EncodedCapture::report);
         if let Some(capture)=&mut capture {timeout(Duration::from_secs(4),capture.stop()).await.context("official capture cleanup timed out")??;}
         report.sent=sent.load(Ordering::Relaxed);report.bytes=bytes.load(Ordering::Relaxed);
         if let Some(input)=&input {(report.input_events,report.input_errors)=input.counters();}
-        result?;Ok(report)
+        result?;audio_result?;Ok(report)
     }
 }

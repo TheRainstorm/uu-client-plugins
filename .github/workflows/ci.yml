@@ -18,7 +18,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: TheRainstorm/uu-client
-          ref: 7e723ac5aa606df4de200b4aaa355223554df755
+          ref: a0e70c16ecc8839e04159b28267109ba3ace25ea
           path: engine
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1

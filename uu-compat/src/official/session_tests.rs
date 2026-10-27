@@ -33,13 +33,16 @@ async fn official_generated_h264_echo_quality_and_stop_release_the_shared_slot()
     let gate=Arc::new(SessionGate::default());
     for cancel in [false,true] {
         let stats=Arc::new(uu_core::media::MediaStats::default());
+        stats.audio.output_enabled.store(false,Ordering::Release);
         let (frames,_)=uu_core::media::frame_channel();
         let media=crate::media::ControllerMedia::new_with_frames(vec![],Some(frames),Some(stats.clone())).await.unwrap();
         let offer=media.offer().await.unwrap();
         let (connection,tx,mut rx,closed)=connection();
         tx.send(serde_json::json!({"type":"offer","sdp":offer})).await.unwrap();
         let(stop,receiver)=watch::channel(false);
-        let host=tokio::spawn(session(connection,true,Instant::now()).serve(context(gate.clone(),receiver)));
+        let mut host_context=context(gate.clone(),receiver);
+        host_context.sharing.audio=Some(uu_media::audio_capture::Source::Synthetic);
+        let host=tokio::spawn(session(connection,true,Instant::now()).serve(host_context));
         let answer=timeout(Duration::from_secs(10),rx.recv()).await.unwrap().unwrap();
         assert!(!answer["sdp"].as_str().unwrap().contains("x-eclipse-"));
         media.set_answer(answer["sdp"].as_str().unwrap()).await.unwrap();
@@ -47,6 +50,7 @@ async fn official_generated_h264_echo_quality_and_stop_release_the_shared_slot()
         assert_eq!(gate.sessions().len(),1);
         assert_eq!(gate.active_peer().as_deref(),Some("uu:generated-controller"));
         assert!(gate.administration.lock().unwrap().is_none());
+        timeout(Duration::from_secs(3),async {while stats.audio.decoded_samples.load(Ordering::Relaxed)==0 {tokio::time::sleep(Duration::from_millis(20)).await;}}).await.unwrap();
         let before=stats.decoded_total.load(Ordering::Relaxed);
         let request=crate::control_wire::capture_setting_request_with_resolution(901,0,1,6,Some(1_500_000),uu_core::video_options::CaptureResolution::Exact(160,90));
         media.send_control(crate::control_wire::capture_codec(&request,false).unwrap()).await.unwrap();
