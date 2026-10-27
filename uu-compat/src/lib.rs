@@ -9,6 +9,7 @@ pub mod config;
 pub mod connection;
 mod ice;
 pub mod controller;
+pub mod official;
 pub mod media;
 pub mod sign;
 pub mod signal;
@@ -68,5 +69,6 @@ impl uu_core::plugins::Listener for connection::Host {
 #[async_trait::async_trait]
 impl uu_core::plugins::Listener for connection::Listener {
     async fn accept(&mut self) -> anyhow::Result<uu_core::internet::Connection> { self.accept().await }
+    async fn accept_session(&mut self)->anyhow::Result<uu_core::plugins::Incoming>{self.accept_session().await}
     async fn close(&mut self) { self.close().await; }
 }
