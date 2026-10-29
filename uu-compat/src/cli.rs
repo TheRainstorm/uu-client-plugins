@@ -175,7 +175,7 @@ pub fn run(config:Config,arguments:Vec<String>)->Result<()> {
                 }
             }
             let success = success.context("missing success event")?;
-            
+
             let ice = crate::ice::from_room(&success,crate::runtime_plugin::allow_relay()?)?;
             let media = crate::media::ControllerMedia::new_with_ice_policy(ice,None,None).await?;
             let sdp = media.offer().await?;
