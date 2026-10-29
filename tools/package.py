@@ -7,6 +7,8 @@ import json
 from pathlib import Path
 import subprocess
 import zipfile
+import tempfile
+import shutil
 import sdk_workspace
 import validate
 
@@ -37,6 +39,12 @@ def main():
     target=json.loads(subprocess.check_output(['cargo','metadata','--no-deps','--format-version','1','--locked'],cwd=workspace,env=environment,text=True))['target_directory']
     extension=Path(target)/args.target/'release'/('uu_compat.dll' if 'windows' in args.target else 'libuu_compat.so')
     if main_metadata['sdk_id']!=metadata['sdk_id']:raise RuntimeError('plugin SDK identity differs from the main application build')
+    # Operate on a distribution copy; leave the build's symbols available for debugging.
+    temporary=tempfile.TemporaryDirectory(prefix='extension-package-')
+    shipped=Path(temporary.name)/extension.name
+    shutil.copy2(extension,shipped)
+    if 'windows' in args.target:sdk.strip_windows_binary(shipped)
+    extension=shipped
     validate.run(ENGINE,extension,main_sdk,main_standard,main_metadata,args.target,sdk)
     if args.validate_only:return
     revision=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip()
