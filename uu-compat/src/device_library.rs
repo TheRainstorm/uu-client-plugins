@@ -112,6 +112,21 @@ pub(super) struct Library {
 }
 
 impl Library {
+    /// Migrate only the active account after explicit plugin opt-in. Existing
+    /// namespaced preferences and the original application file are preserved.
+    pub fn migrate(context:&uu_plugin_sdk::Context)->anyhow::Result<()> {
+        let Some(token)=crate::account::read_token(&context.data.at("state.json"))? else{return Ok(());};
+        if crate::account::read_token(&context.application.at("state.json"))?.as_deref()!=Some(token.as_str()){return Ok(());}
+        let old=Self::for_account(Some(&context.application),Some(&token));
+        let new=Self::for_account(Some(&context.data),Some(&token));
+        if let (Some(old),Some(new))=(old.path,new.path) {
+            if !new.exists()&&old.exists() {
+                Preferences::load(&old)?;
+                crate::private_file::write_atomic(&new,&crate::runtime_plugin::read_bounded(&old,MAX_FILE_BYTES as u64)?)?;
+            }
+        }
+        Ok(())
+    }
     pub fn for_account(config: Option<&uu_core::Config>, token: Option<&str>) -> Self {
         let (Some(config), Some(token)) = (config, token.filter(|token| !token.is_empty())) else {
             return Self::default();

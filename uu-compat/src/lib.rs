@@ -7,6 +7,7 @@ mod login;
 mod account;
 mod uu_devices;
 mod device_library;
+mod wallpapers;
 pub mod cli;
 pub mod protocol;
 pub mod selfloop;
@@ -51,7 +52,7 @@ struct Service {context:uu_plugin_sdk::Context}
 #[async_trait::async_trait]
 impl uu_core::plugins::ConnectionService for Service {
     fn descriptor(&self) -> uu_core::plugins::Descriptor {
-        uu_core::plugins::Descriptor { id: "uu", name: "UU compatibility", version: env!("CARGO_PKG_VERSION") }
+        uu_core::plugins::Descriptor { id: "uu", name: uu_i18n::text("UU 账号连接服务"), version: env!("CARGO_PKG_VERSION") }
     }
     async fn devices(&self,_config:&Config)->anyhow::Result<Vec<uu_core::plugins::RemoteDevice>> {
         runtime_plugin::devices(&self.context.data).await

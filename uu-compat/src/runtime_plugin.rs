@@ -31,9 +31,10 @@ impl Plugin for Extension {
         ENABLED.store(value,Ordering::Release);Ok(())
     }
     fn pages(&self)->Vec<Page> {
-        vec![Page{id:"devices".into(),title:"UU".into(),placement:Placement::Navigation},
-            Page{id:"account".into(),title:uu_i18n::text("UU 账号").into(),placement:Placement::Connections},
-            Page{id:"settings".into(),title:"UU".into(),placement:Placement::Settings}]
+        vec![Page{id:"devices".into(),title:uu_i18n::text("UU 兼容").into(),placement:Placement::Navigation,
+                icon:Some(uu_plugin_sdk::ui::Icon::Image{id:"uu-service-mark",bytes:include_bytes!("../assets/uu-remote.ico")})},
+            Page{id:"account".into(),title:uu_i18n::text("UU 账号连接服务").into(),placement:Placement::Connections,icon:None},
+            Page{id:"settings".into(),title:uu_i18n::text("UU 兼容").into(),placement:Placement::Settings,icon:None}]
     }
     fn gui(&self)->Result<Box<dyn PageState>> {Ok(Box::new(super::plugin_gui::Ui::new(self.context.clone())?))}
     fn service(&self)->Option<Arc<dyn uu_core::plugins::ConnectionService>> {Some(Arc::new(super::Service{context:self.context.clone()}))}
@@ -94,6 +95,7 @@ fn migrate(context:&Context)->Result<()> {
             super::private_file::write_atomic(&new,&bytes)?;
         }
     }
+    super::device_library::Library::migrate(context)?;
     let old_host=context.application.at("plugins/uu-compat-host.json");
     let host=context.data.at("host.json");
     if !host.exists()&&old_host.exists() {
@@ -136,6 +138,8 @@ mod tests {
         let mut state=crate::ClientState::default();state.token=Some("generated-migration-token".into());
         state.save(&config.at("state.json")).unwrap();
         let original=std::fs::read(config.at("state.json")).unwrap();
+        let mut library=crate::device_library::Library::for_account(Some(&config),Some("generated-migration-token"));
+        library.toggle_favorite("generated-favorite");library.record_opened("generated-favorite");
         let store=Store::open(config.at("device-trust")).unwrap();
         store.edit(|book| {
             book.devices.push(Profile::new("Saved UU route",Destination::Unavailable(serde_json::json!({"kind":"uu","device":"generated-device"}))));
@@ -146,6 +150,7 @@ mod tests {
         assert!(!context.preferences().unwrap().enabled);
         assert_eq!(std::fs::read(config.at("state.json")).unwrap(),original);
         assert_eq!(std::fs::read(context.data.at("state.json")).unwrap(),original);
+        assert!(crate::device_library::Library::for_account(Some(&context.data),Some("generated-migration-token")).is_favorite("generated-favorite"));
         let book=store.read().unwrap();
         assert!(matches!(&book.devices[0].routes[0].destination,Destination::Plugin{plugin,device} if plugin=="uu"&&device=="generated-device"));
         assert!(matches!(&book.devices[1].routes[0].destination,Destination::Unavailable(value) if value["opaque"]=="retained"));
