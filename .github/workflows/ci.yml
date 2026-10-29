@@ -74,4 +74,24 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           PLUGIN_TAG: ${{ github.ref_name }}
-        run: gh release create "$PLUGIN_TAG" artifacts/*.zip --title "$PLUGIN_TAG" --notes 'Optional UU plugin. Install the matching main application separately; extract at its directory and enable manually.'
+        run: |
+          if gh release view "$PLUGIN_TAG" --json isDraft --jq '.isDraft' > "$RUNNER_TEMP/plugin-release-state" 2>/dev/null; then
+            test "$(cat "$RUNNER_TEMP/plugin-release-state")" = false
+            mkdir existing
+            gh release download "$PLUGIN_TAG" --pattern "*-${GITHUB_SHA:0:12}.zip" --dir existing
+            python3 - <<'PY'
+          import hashlib,json,pathlib,zipfile
+          current=list(pathlib.Path('artifacts').glob('*.zip'))
+          published=list(pathlib.Path('existing').glob('*.zip'))
+          assert len(current)==len(published)==1 and current[0].name==published[0].name
+          with zipfile.ZipFile(current[0]) as a,zipfile.ZipFile(published[0]) as b:
+              assert len(a.namelist())==len(b.namelist()) and set(a.namelist())==set(b.namelist())
+              expected=json.loads(a.read('plugins/uu/plugin.json'));actual=json.loads(b.read('plugins/uu/plugin.json'))
+              for key in ['api_version','sdk_id','id','version','library','data_files']:assert actual[key]==expected[key]
+              assert hashlib.sha256(b.read('plugins/uu/'+actual['library'])).hexdigest()==actual['library_sha256']
+              assert b.testzip() is None
+          PY
+            echo 'Published plugin matches the tag and SDK; retaining immutable assets.'
+            exit 0
+          fi
+          gh release create "$PLUGIN_TAG" --verify-tag artifacts/*.zip --title "$PLUGIN_TAG" --notes 'Optional UU plugin. Install the matching main application separately; extract at its directory and enable manually.'
