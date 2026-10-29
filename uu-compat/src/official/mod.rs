@@ -2,7 +2,7 @@
 mod settings;
 pub(crate) mod wire;
 mod session;
-mod input;
+pub(crate) mod input;
 #[cfg(test)]
 mod session_tests;
 pub use settings::Settings;

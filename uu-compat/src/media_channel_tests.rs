@@ -1,5 +1,6 @@
 //! Interoperability: Windows hosts send CaptureChange on TEXT, independently
 //! of CONTROL's echo/input traffic. Exercise real SCTP channels, not a parser call.
+use webrtc::peer_connection::configuration::RTCConfiguration;
 use super::*;
 use crate::control_wire::{bytes, envelope, int};
 use webrtc::{data_channel::data_channel_state::RTCDataChannelState,
@@ -28,17 +29,36 @@ async fn text_channel_delivers_display_changes_and_rpc_replies() {
     let answer = host.create_answer(None).await.unwrap(); host.set_local_description(answer).await.unwrap();
     tokio::time::timeout(Duration::from_secs(5), gathered.recv()).await.unwrap();
     media.set_answer(&host.local_description().await.unwrap().sdp).await.unwrap();
-    let text = tokio::time::timeout(Duration::from_secs(5), async {
+    let (text,control) = tokio::time::timeout(Duration::from_secs(5), async {
+        let mut text=None;let mut control=None;
         while let Some(channel) = rx.recv().await {
-            if channel.label() == "TEXT_DATA_CHANNEL" { return channel; }
+            if channel.label() == "TEXT_DATA_CHANNEL" {text=Some(channel.clone());}
+            if channel.label() == "CONTROL_DATA_CHANNEL" {control=Some(channel);}
+            if text.is_some()&&control.is_some(){return (text.unwrap(),control.unwrap());}
         }
         panic!("TEXT channel missing");
     }).await.unwrap();
+    let (input_tx,mut input_rx)=tokio::sync::mpsc::unbounded_channel();
+    control.on_message(Box::new(move|message|{let tx=input_tx.clone();Box::pin(async move {
+        if let Ok(value)=serde_json::from_slice::<serde_json::Value>(&message.data){if value.get("action").is_some(){let _=tx.send(value);}}
+    })}));
     tokio::time::timeout(Duration::from_secs(5), async {
-        while text.ready_state() != RTCDataChannelState::Open {
+        while text.ready_state() != RTCDataChannelState::Open||control.ready_state()!=RTCDataChannelState::Open {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
     }).await.unwrap();
+    let mut input=crate::controller_input::Input::default();
+    use uu_core::native_input::{InputCommand as I,MouseButton};
+    input.send(&media,I::Key{usage:4,pressed:true},7).await.unwrap();
+    input.send(&media,I::Key{usage:0xe1,pressed:true},7).await.unwrap();
+    input.send(&media,I::Button{button:MouseButton::Middle,pressed:true},7).await.unwrap();
+    input.reset(&media,7).await.unwrap();
+    let events=tokio::time::timeout(Duration::from_secs(3),async {
+        let mut values=Vec::new();while values.len()<6{values.push(input_rx.recv().await.unwrap());}values
+    }).await.unwrap();
+    assert_eq!(events.iter().map(|v|v["action"].as_str().unwrap()).collect::<Vec<_>>(),vec!["kbd_press","kbd_press","mouse_press","mouse_release","kbd_release","kbd_release"]);
+    assert_eq!(events[0]["key"],65);assert_eq!(events[2]["button"],16);
+    assert!(events.iter().all(|v|v["screen_id"]==7));
     let mut screen = Vec::new(); int(1, 7, &mut screen); int(12, 0, &mut screen);
     bytes(10, b"native display", &mut screen);
     let mut inventory = Vec::new(); bytes(1, &screen, &mut inventory); int(2, 7, &mut inventory);

@@ -94,6 +94,8 @@ impl Session {
         let offer=timeout(Duration::from_secs(3),self.connection.transport.receive()).await??;
         ensure!(offer["type"]=="offer","official offer missing");
         let sdp=offer["sdp"].as_str().filter(|v|v.len()<=256*1024).context("invalid official SDP")?;
+        let filtered=crate::ice::remote_sdp(sdp,self.connection.ice.development_relay());
+        let sdp=filtered.as_str();
         ensure!(!sdp.lines().any(|l|l.starts_with("a=x-eclipse-")),"native extension cannot enter the official protocol");
         let mut engine=MediaEngine::default();
         engine.register_codec(RTCRtpCodecParameters {capability:h264(),payload_type:96,..Default::default()},RTPCodecType::Video)?;
@@ -196,7 +198,10 @@ impl Session {
                         if message["type"]=="candidate" {
                             let value=message.get("candidate").context("ICE candidate missing")?;
                             let candidate=if value.is_string(){serde_json::json!({"candidate":value,"sdpMid":message["sdpMid"],"sdpMLineIndex":message["sdpMLineIndex"]})}else{value.clone()};
-                            pc.add_ice_candidate(serde_json::from_value(candidate)?).await?;
+                            let candidate:webrtc::ice_transport::ice_candidate::RTCIceCandidateInit=serde_json::from_value(candidate)?;
+                            if crate::ice::candidate_allowed(&candidate.candidate,self.connection.ice.development_relay()) {
+                                pc.add_ice_candidate(candidate).await?;
+                            }
                         }
                     },
                     frame=source.next(),if streaming=>{

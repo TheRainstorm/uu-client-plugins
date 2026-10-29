@@ -28,6 +28,31 @@ fn session(connection:Connection,enabled:bool,created:Instant)->Box<Session>{
     Box::new(Session::new(connection,ConnectOptions{fps:60,bounds:Some([320,180])},Settings{enabled,..Default::default()},"generated-controller".into(),created))
 }
 #[tokio::test(flavor="multi_thread",worker_threads=2)]
+async fn official_generated_media_crosses_turn_with_no_direct_candidates() {
+    crate::install_crypto_provider();
+    let turn=crate::relay_tests::Turn::new().await;
+    let stats=Arc::new(uu_core::media::MediaStats::default());
+    let _=stats.decoder_preference.set(uu_core::media::DecoderKind::Software);
+    stats.audio.output_enabled.store(false,Ordering::Release);
+    let(frames,_)=uu_core::media::frame_channel();
+    let media=crate::media::ControllerMedia::new_with_ice_policy(turn.ice(),Some(frames),Some(stats.clone())).await.unwrap();
+    let offer=media.offer().await.unwrap();crate::relay_tests::relay_only(&offer);
+    let(mut connection,tx,mut rx,closed)=connection();connection.ice=turn.ice();
+    tx.send(serde_json::json!({"type":"offer","sdp":offer})).await.unwrap();
+    let(stop,receiver)=watch::channel(false);let gate=Arc::new(SessionGate::default());
+    let host=tokio::spawn(session(connection,true,Instant::now()).serve(context(gate.clone(),receiver)));
+    let answer=timeout(Duration::from_secs(12),rx.recv()).await.unwrap().unwrap();
+    crate::relay_tests::relay_only(answer["sdp"].as_str().unwrap());
+    media.set_answer(answer["sdp"].as_str().unwrap()).await.unwrap();
+    timeout(Duration::from_secs(12),async {while stats.decoded_total.load(Ordering::Acquire)<10 {assert!(!host.is_finished());tokio::time::sleep(Duration::from_millis(20)).await;}}).await.unwrap();
+    let pair=media.pc.sctp().transport().ice_transport().get_selected_candidate_pair().await.unwrap();
+    use webrtc::ice_transport::ice_candidate_type::RTCIceCandidateType;
+    assert_eq!(pair.local().typ,RTCIceCandidateType::Relay);assert_eq!(pair.remote().typ,RTCIceCandidateType::Relay);
+    stop.send_replace(true);let report=timeout(Duration::from_secs(6),host).await.unwrap().unwrap().unwrap();
+    assert!(report.sent>=10);assert!(closed.load(Ordering::Acquire));assert!(gate.sessions().is_empty());
+    media.pc.close().await.unwrap();turn.close().await;
+}
+#[tokio::test(flavor="multi_thread",worker_threads=2)]
 async fn official_generated_h264_echo_quality_and_stop_release_the_shared_slot(){
     crate::install_crypto_provider();
     let gate=Arc::new(SessionGate::default());

@@ -179,7 +179,7 @@ async fn delayed_trickle_opens_control_and_delivers_initial_settings() {
     input.send(activation).unwrap();
     let (_setting, mut settings_rx) = unbounded_channel();
     tokio::time::timeout(Duration::from_secs(25), drive_session(&mut sio, &media, "test", "ice", &ev,
-        &mut input_rx, &mut settings_rx, settings, "host", &mut local_ice)).await.unwrap().unwrap();
+        &mut input_rx, &mut settings_rx, settings, "host", &mut local_ice,&mut None,&mut crate::controller_input::Input::default(),&stats)).await.unwrap().unwrap();
     assert!(events.try_iter().any(|event| matches!(event, ControllerEvent::Status(s) if s == "已请求目标画质/码率")));
     assert_eq!(stats.clipboard.remote.lock().unwrap().as_ref().and_then(crate::clipboard::Content::as_text),Some("host-to-local 🙂"));
     assert!(stats.display_responses.lock().unwrap().contains(&(10001,11,0)));

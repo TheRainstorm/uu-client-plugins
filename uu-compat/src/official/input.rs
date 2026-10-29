@@ -4,7 +4,7 @@ use serde_json::Value;
 use uu_core::native_input::{InputCommand as I,KeyCode,MouseButton};
 
 pub(super) enum Message { Heartbeat, Commands(Vec<I>), Text(String) }
-fn usage(vk:u64)->Option<u16> {
+pub(crate) fn usage(vk:u64)->Option<u16> {
     let name=match vk {
         0x41..=0x5a=>format!("Key{}",char::from_u32(vk as u32)?),
         0x30..=0x39=>format!("Digit{}",char::from_u32(vk as u32)?),

@@ -2,6 +2,17 @@
 use anyhow::{ensure,Result};
 use serde_json::Value;
 use webrtc::ice_transport::ice_server::RTCIceServer;
+
+/// Official peers trickle even when our side disables relay. Ignore their
+/// relay candidates consistently in both bundled SDP and subsequent trickle.
+pub(crate) fn candidate_allowed(candidate:&str,relay:bool)->bool {
+    relay || candidate.split_ascii_whitespace().nth(7)!=Some("relay")
+}
+pub(crate) fn remote_sdp(sdp:&str,relay:bool)->String {
+    if relay {return sdp.into();}
+    sdp.lines().filter(|line|!line.starts_with("a=candidate:")||candidate_allowed(line,false))
+        .map(|line|format!("{line}\r\n")).collect()
+}
 pub fn from_room(header:&Value,relay:bool)->Result<uu_core::direct_ice::InternetIce>{
     let nested=header.get("data").unwrap_or(header);
     let field=|key|header.get(key).or_else(||nested.get(key));

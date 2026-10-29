@@ -13,7 +13,7 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 
 use crate::api::UuApi;
 use crate::config::Config;
-use crate::media::{ice_servers_from_json, ControllerMedia};
+use crate::media::ControllerMedia;
 use crate::signal::SignalClient;
 use crate::socketio::{gunzip_sdp04, gzip_sdp04, SocketIo};
 
@@ -28,9 +28,20 @@ pub fn spawn_with_stats(config:Config,device:String,geo_ip:String,stats:std::syn
 }
 
 pub fn spawn_target(config:Config,target:Target,geo_ip:String,stats:std::sync::Arc<crate::media::MediaStats>)->Result<ControllerHandle> {
+    spawn_inner(config,target,geo_ip,stats,None)
+}
+pub fn spawn_typed(config:Config,target:Target,geo_ip:String,stats:std::sync::Arc<crate::media::MediaStats>,client:uu_core::client_settings::ClientSettings)->Result<ControllerHandle> {
+    spawn_inner(config,target,geo_ip,stats,Some(client))
+}
+fn spawn_inner(config:Config,target:Target,geo_ip:String,stats:std::sync::Arc<crate::media::MediaStats>,client:Option<uu_core::client_settings::ClientSettings>)->Result<ControllerHandle> {
     crate::require_enabled()?;
     crate::install_crypto_provider();
     stats.capabilities.set(crate::capabilities::Capabilities::ALL);
+    let (typed_tx,typed_rx)=uu_core::native_input::channel(true);
+    let typed=client.is_some();
+    stats.display_track_binding.store(typed,std::sync::atomic::Ordering::Release);
+    if typed {*stats.native_quality_response.lock().unwrap()=Some(uu_core::native_quality::Response{dynamic:true,codecs:vec![uu_core::native::VideoCodec::H264,uu_core::native::VideoCodec::Hevc],max_fps:144,max_bitrate_kbps:1_000_000});}
+    if let Some(client)=&client {stats.clipboard.enabled.store(client.native_clipboard,std::sync::atomic::Ordering::Release);}
     let (ev_tx, ev_rx) = std::sync::mpsc::channel();
     let (frame_tx, frame_rx) = crate::media::frame_channel();
     let (input_tx, input_rx) = unbounded_channel();
@@ -59,6 +70,8 @@ pub fn spawn_target(config:Config,target:Target,geo_ip:String,stats:std::sync::A
             settings_rx,
             close_rx,
             stats_run,
+            typed.then_some(typed_rx),
+            client,
         )) {
             let _ = ev_tx.send(ControllerEvent::Error(e.to_string()));
         }
@@ -70,7 +83,7 @@ pub fn spawn_target(config:Config,target:Target,geo_ip:String,stats:std::sync::A
         events: ev_rx,
         frames: frame_rx,
         input: input_tx,
-        native_input:None,
+        native_input:typed.then_some(typed_tx),
         settings: settings_tx,
         close: close_tx,
         stats,
@@ -112,7 +125,10 @@ async fn run(
     mut settings_rx: UnboundedReceiver<Vec<u8>>,
     mut close_rx: UnboundedReceiver<()>,
     stats: std::sync::Arc<crate::media::MediaStats>,
+    mut typed_rx:Option<uu_core::native_input::NativeInputReceiver>,
+    preferences:Option<uu_core::client_settings::ClientSettings>,
 ) -> Result<()> {
+    let mut protocol_input=crate::controller_input::Input::default();
     let phase_started=std::time::Instant::now();
     let status = |s: &str| {
         stats.diagnostics.record(serde_json::json!({
@@ -126,6 +142,8 @@ async fn run(
     // same cleanup, including failures and cancellation during negotiation.
     let mut socket = None;
     let mut peer = None;
+    let token=crate::account::read_token(&config.at("state.json"))?;
+    let account_changed=crate::account::changed(config.clone(),token);
     let attempt = async {
     let hevc = if stats.prefer_hevc.load(std::sync::atomic::Ordering::Acquire) {
         status(uu_i18n::text("正在检查 H.265 硬件解码…"));
@@ -216,10 +234,11 @@ async fn run(
     let success = success.context("missing success event")?;
     status(uu_i18n::text("收到被控端参数"));
     eprintln!("ICE server entries={}", success["iceServers"].as_array().map_or(0,Vec::len));
-    let ice = ice_servers_from_json(&success["iceServers"]);
-    stats.diagnostics.record(serde_json::json!({"event":"ice_servers","count":ice.len()}));
+    let allow_relay=crate::runtime_plugin::allow_relay()?;
+    let ice = crate::ice::from_room(&success,allow_relay)?;
+    stats.diagnostics.record(serde_json::json!({"event":"ice_servers","count":ice.configuration().ice_servers.len(),"allow_relay":allow_relay}));
     status(uu_i18n::text("建立 WebRTC…"));
-    peer = Some(ControllerMedia::new_with_frames(ice, Some(frame_tx), Some(stats.clone())).await?);
+    peer = Some(ControllerMedia::new_with_ice_policy(ice, Some(frame_tx), Some(stats.clone())).await?);
     let media = peer.as_ref().unwrap();
     let ice_id = success["ice_id"].as_str().unwrap_or_default().to_string();
     let target = success["client_id"].as_str().unwrap_or_default().to_string();
@@ -228,18 +247,18 @@ async fn run(
     // Ask the controlled end for the target frame rate. Without this the host
     // streams at its idle default (~21 fps); the official client sends the same
     // CaptureSettingRequest. Retry a few times while CONTROL settles.
-    let frame_rate = crate::control_wire::CaptureFrameRate::from_env();
+    let frame_rate = preferences.as_ref().and_then(|c|crate::control_wire::CaptureFrameRate::new(c.fps)).unwrap_or_else(crate::control_wire::CaptureFrameRate::from_env);
     let bitrate_mbps: Option<u64> = std::env::var("UU_BITRATE")
         .ok()
         .and_then(|v| v.parse().ok());
     // Quality 6 is the custom-bitrate preset; the official host only honours
     // field 8 when it is paired with quality 6.
-    let quality: u64 = std::env::var("UU_QUALITY")
+    let quality: u64 = preferences.as_ref().map(|c|if matches!(c.bitrate,1..=4){6}else{5}).or_else(||std::env::var("UU_QUALITY")
         .ok()
         .and_then(|v| v.parse().ok())
-        .unwrap_or(if bitrate_mbps.is_some() { 6 } else { 5 });
+        .or(None)).unwrap_or(if bitrate_mbps.is_some() { 6 } else { 5 });
     let custom_bps = if quality == 6 {
-        Some(bitrate_mbps.unwrap_or(30).saturating_mul(1_000_000))
+        Some(preferences.as_ref().and_then(|c|c.native_request().bitrate_kbps).map(|kbps|u64::from(kbps)*1000).unwrap_or_else(||bitrate_mbps.unwrap_or(30).saturating_mul(1_000_000)))
     } else {
         None
     };
@@ -249,12 +268,13 @@ async fn run(
         1000, crate::control_wire::now_ms(), frame_rate, quality, custom_bps,
         resolution,false,-1,
     );
-    drive_session(sio, media, &ctrl, &ice_id, &ev, &mut input_rx, &mut settings_rx, initial_settings, &target, &mut local_ice).await?;
+    drive_session(sio, media, &ctrl, &ice_id, &ev, &mut input_rx, &mut settings_rx, initial_settings, &target, &mut local_ice,&mut typed_rx,&mut protocol_input,&stats).await?;
     Ok::<_, anyhow::Error>(())
     };
     let result = tokio::select! {
         biased;
         _ = close_rx.recv() => Ok(()),
+        _ = account_changed => Err(anyhow::anyhow!("UU account changed; connection closed")),
         result = attempt => result,
     };
     stats.audio.stop();
@@ -265,6 +285,7 @@ async fn run(
     // every cleanup operation so a dead network cannot trap the UI on exit.
     if let Some(media) = &peer {
         let _ = tokio::time::timeout(std::time::Duration::from_millis(250), async {
+            let _=protocol_input.reset(media,crate::controller_input::screen(&stats)).await;
             while let Ok(frame) = input_rx.try_recv() {
                 let _ = media.send_input(frame).await;
             }
@@ -357,6 +378,9 @@ async fn drive_session(
     initial_settings: Vec<u8>,
     target: &str,
     local_ice: &mut LocalIceCandidates,
+    typed_rx:&mut Option<uu_core::native_input::NativeInputReceiver>,
+    protocol_input:&mut crate::controller_input::Input,
+    stats:&crate::media::MediaStats,
 ) -> Result<()> {
     use std::time::Duration;
     use webrtc::data_channel::data_channel_state::RTCDataChannelState;
@@ -370,6 +394,8 @@ async fn drive_session(
     let mut policy_sent=None;
     let mut policy_started=None;
     let mut pending_setting: Option<Vec<u8>> = None;
+    let mut pending_quality=None;
+    let mut pending_display:Option<(u64,i32)>=None;
     let mut last_attempt = None;
     let mut last_transport = String::new();
     let mut setup_timer = tokio::time::interval(Duration::from_millis(250));
@@ -386,6 +412,22 @@ async fn drive_session(
             }
             _ = setup_timer.tick() => {
                 media.trace_transport(&mut last_transport);
+                if let Some((id,source))=pending_display {
+                    let track={let screens=stats.remote_screens.lock().unwrap();screens.screens.iter().find(|s|s.id==source).and_then(|s|s.assigned_track())};
+                    if let Some(track)=track {
+                        let _=media.send_control(crate::screen_control::send_video_track(id,track)).await;
+                        pending_display=None;
+                    }
+                }
+                if let Some((id,update))=pending_quality {
+                    let response=stats.settings_response.load(std::sync::atomic::Ordering::Acquire);
+                    if response>>1==id {
+                        let accepted=response&1!=0;
+                        if accepted {*stats.native_quality_current.lock().unwrap()=Some(update);}
+                        *stats.native_quality_applied.lock().unwrap()=Some(uu_core::native_quality::Applied{request:id,settings:update,bitrate_kbps:update.bitrate_kbps.unwrap_or(0),error:(!accepted).then(||"UU host rejected capture settings".into())});
+                        pending_quality=None;
+                    }
+                }
                 let now = tokio::time::Instant::now();
                 match media.pc.connection_state() {
                     RTCPeerConnectionState::Failed => anyhow::bail!("WebRTC 连接失败（ICE/DTLS）"),
@@ -395,6 +437,7 @@ async fn drive_session(
                 if media.data_channel.ready_state() == RTCDataChannelState::Open {
                     if opened_at.is_none() {
                         opened_at = Some(now);
+                        stats.native_input_available.store(true,std::sync::atomic::Ordering::Release);
                         status("已连接");
                         sio.emit("ice_finished_log", json!({"app_control_id":ctrl,"ice_id":ice_id}), &[]).await?;
                     }
@@ -444,6 +487,28 @@ async fn drive_session(
             _ = probe_timer.tick(), if opened_at.is_some() => media.probe_network().await,
             _ = input_heartbeat.tick(), if opened_at.is_some() => {
                 let _ = media.send_control(br#"{"heartbeat":"kbd_heartbeat"}"#.to_vec()).await;
+            }
+            command=async {match typed_rx {Some(rx)=>rx.next_protocol().await,None=>std::future::pending().await}}, if opened_at.is_some()=>{
+                use uu_core::native_input::ProtocolCommand as P;
+                let screen=crate::controller_input::screen(stats);
+                match command {
+                    Some(P::Input(command))=>{protocol_input.send(media,command,screen).await?;},
+                    Some(P::Reset|P::Mode(false))=>{protocol_input.reset(media,screen).await?;},
+                    Some(P::Mode(true))=>{},
+                    Some(P::Quality(id,update))=>{
+                        let fps=crate::control_wire::CaptureFrameRate::new(update.fps).context("UU frame rate outside supported range")?;
+                        anyhow::ensure!(update.rate_control.is_none(),"UU does not support native rate-control updates");
+                        pending_quality=Some((id,update));
+                        pending_setting=Some(crate::control_wire::capture_setting_for_screen(id,crate::control_wire::now_ms(),fps,if update.bitrate_kbps.is_some(){6}else{5},update.bitrate_kbps.map(|v|u64::from(v)*1000),crate::control_wire::CaptureResolution::Unchanged,false,screen));
+                    },
+                    Some(P::Display(id,screen))=>{
+                        protocol_input.reset(media,crate::controller_input::screen(stats)).await?;
+                        stats.native_displays.request(id);
+                        media.send_control(crate::screen_control::activate_screen(id,screen)).await?;
+                        pending_display=Some((id,screen));
+                    },
+                    None=>break,
+                }
             }
             Some(frame) = input_rx.recv(), if opened_at.is_some() => {
                 if media.send_input(frame).await.is_err() {

@@ -21,7 +21,7 @@ mod tests {
         assert!(!Settings::load(&config).unwrap().enabled);
         let wanted=Settings {enabled:true,control:false,audio:true,clipboard:false};wanted.save(&config).unwrap();
         assert_eq!(Settings::load(&config).unwrap(),wanted);
-        let path=config.at("plugins/uu-compat-host.json");std::fs::write(&path,b"{broken}").unwrap();
+        let path=config.at("host.json");std::fs::write(&path,b"{broken}").unwrap();
         assert!(Settings::load(&config).is_err());assert_eq!(std::fs::read(path).unwrap(),b"{broken}");
         std::fs::remove_dir_all(directory).unwrap();
     }
@@ -31,15 +31,14 @@ impl Default for Settings {
 }
 impl Settings {
     pub fn load(config:&uu_core::Config)->Result<Self> {
-        let path=config.at("plugins/uu-compat-host.json");
-        let bytes=match std::fs::read(&path) {
-            Ok(bytes)=>bytes,Err(error) if error.kind()==std::io::ErrorKind::NotFound=>return Ok(Self::default()),Err(error)=>return Err(error).context("cannot read compatibility host settings"),
-        };
+        let path=config.at("host.json");
+        if !path.exists(){return Ok(Self::default());}
+        let bytes=crate::runtime_plugin::read_bounded(&path,16*1024).context("cannot read compatibility host settings")?;
         ensure!(bytes.len()<=16*1024,"compatibility host settings exceed size limit");
         serde_json::from_slice(&bytes).context("invalid compatibility host settings; original file preserved")
     }
     pub fn save(&self,config:&uu_core::Config)->Result<()> {
-        let path=config.at("plugins/uu-compat-host.json");
+        let path=config.at("host.json");
         std::fs::create_dir_all(path.parent().unwrap())?;
         uu_core::plugin_backend::write_private_file(&path,&serde_json::to_vec_pretty(self)?)?;
         Ok(())

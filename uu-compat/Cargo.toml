@@ -6,11 +6,18 @@ license.workspace = true
 repository = "https://github.com/TheRainstorm/uu-client-plugins"
 description = "Optional UU account, rendezvous and compatible session plugin"
 
+[lib]
+crate-type = ["cdylib", "rlib"]
+
 [features]
-default = ["enabled"]
-enabled = []
+default = []
+vaapi = ["uu-plugin-sdk/vaapi","uu-core/vaapi"]
 
 [dependencies]
+uu-plugin-sdk = {path="../../crates/uu-plugin-sdk"}
+uu-input = {path="../../crates/uu-input"}
+clap.workspace = true
+qrcode = "0.14"
 uu-core = { path = "../../crates/uu-core" }
 uu-proto = { path = "../../crates/uu-proto" }
 uu-media = { path = "../../crates/uu-media" }
@@ -42,3 +49,6 @@ tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
 webrtc = "0.11"
 socket2 = "0.5"
 uu-capture = {path="../../crates/uu-capture"}
+
+[build-dependencies]
+serde_json.workspace = true

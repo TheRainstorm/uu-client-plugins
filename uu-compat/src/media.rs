@@ -13,10 +13,8 @@ use webrtc::api::interceptor_registry::configure_rtcp_reports;
 use webrtc::api::media_engine::{MediaEngine, MIME_TYPE_H264, MIME_TYPE_OPUS};
 use webrtc::api::APIBuilder;
 use webrtc::ice_transport::ice_candidate::RTCIceCandidateInit;
-use webrtc::ice_transport::ice_credential_type::RTCIceCredentialType;
 use webrtc::ice_transport::ice_server::RTCIceServer;
 use webrtc::interceptor::registry::Registry;
-use webrtc::peer_connection::configuration::RTCConfiguration;
 use webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState;
 use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
 use webrtc::peer_connection::RTCPeerConnection;
@@ -30,6 +28,7 @@ pub use uu_media::DecoderKind;
 pub use uu_core::media::MediaStats;
 use uu_core::plugin_backend::{receive_audio,receive_video};
 pub struct ControllerMedia {
+    allow_relay:bool,
     _connection_monitor:Option<crate::connection_info::Monitor>,
     pub pc: Arc<RTCPeerConnection>,
     repairs: Arc<crate::rtx::RepairBus>,
@@ -79,11 +78,21 @@ impl ControllerMedia {
         frames: Option<FrameSender>,
         stats: Option<Arc<MediaStats>>,
     ) -> Result<Self> {
+        let policy=uu_core::direct_ice::InternetIce::from_servers(ice,false,false)?;
+        Self::new_with_ice_policy(policy,frames,stats).await
+    }
+
+    pub async fn new_with_ice_policy(
+        ice: uu_core::direct_ice::InternetIce,
+        frames: Option<FrameSender>,
+        stats: Option<Arc<MediaStats>>,
+    ) -> Result<Self> {
         // With no usable STUN/TURN servers, webrtc-ice still waits its fixed
         // STUN gather timeout. Host candidates are available immediately, so
         // avoid that pointless delay and only fall back to the full wait if no
         // candidate appears in the local SDP.
-        let wait_for_ice_gather = !ice.is_empty();
+        let configuration=ice.configuration();
+        let wait_for_ice_gather = !configuration.ice_servers.is_empty();
         let mut media = MediaEngine::default();
         register_receive_codecs(&mut media, stats.as_ref().is_some_and(|s| s.hevc_enabled.get() == Some(&true)))?;
         let mut registry = Registry::new();
@@ -102,10 +111,7 @@ impl ControllerMedia {
             .build();
 
         let pc = Arc::new(
-            api.new_peer_connection(RTCConfiguration {
-                ice_servers: ice,
-                ..Default::default()
-            })
+            api.new_peer_connection(configuration)
             .await?,
         );
 
@@ -268,6 +274,9 @@ impl ControllerMedia {
                                         s.exclusive_result.store(if code==0{1}else{2},Ordering::Release);
                                         if code==0{s.exclusive_owned.store(true,Ordering::Release);}
                                     }
+                                    if matches!(case,11|19) {
+                                        s.native_displays.response(uu_core::native_displays::Response{request:id,accepted:code==0,restart:false});
+                                    }
                                     let mut replies=s.display_responses.lock().unwrap();
                                     if replies.len()==16{replies.pop_front();}
                                     replies.push_back((id,case,code));
@@ -285,7 +294,8 @@ impl ControllerMedia {
                             if let Some((id, accepted)) = crate::control_wire::capture_setting_response(&msg.data) {
                                 if let Some(s) = &stats {
                                     s.diagnostics.record(serde_json::json!({"event":"settings_reply","channel":channel,"request":id,"accepted":accepted}));
-                                    s.settings_response.fetch_max((id << 1) | accepted as u64, Ordering::Release);
+                                    s.settings_response.store((id << 1) | accepted as u64, Ordering::Release);
+                                    s.native_displays.response(uu_core::native_displays::Response{request:id,accepted,restart:false});
                                 }
                             }
                             let reading = {
@@ -321,6 +331,7 @@ impl ControllerMedia {
         let dc = control_dc.expect("CONTROL_DATA_CHANNEL must be created");
 
         Ok(Self {
+            allow_relay:ice.development_relay(),
             _connection_monitor:stats.as_ref().map(|stats|{stats.connection.set_service(uu_i18n::text("UU 兼容连接"));crate::connection_info::Monitor::start(&pc,stats)}),
             pc,
             repairs,
@@ -400,6 +411,8 @@ impl ControllerMedia {
     }
 
     pub async fn set_answer(&self, sdp: &str) -> Result<()> {
+        let filtered=crate::ice::remote_sdp(sdp,self.allow_relay);
+        let sdp=filtered.as_str();
         self.repairs.configure(sdp);
         self.pc
             .set_remote_description(RTCSessionDescription::answer(sdp.to_string())?)
@@ -417,6 +430,7 @@ impl ControllerMedia {
     }
 
     pub async fn add_candidate(&self, candidate: String, mid: String, index: u16) -> Result<()> {
+        if !crate::ice::candidate_allowed(&candidate,self.allow_relay) {return Ok(());}
         self.pc
             .add_ice_candidate(RTCIceCandidateInit {
                 candidate,
@@ -427,30 +441,6 @@ impl ControllerMedia {
             .await?;
         Ok(())
     }
-}
-
-/// Convert the `iceServers` array from the `success` event.
-pub fn ice_servers_from_json(v: &serde_json::Value) -> Vec<RTCIceServer> {
-    v.as_array()
-        .map(|a| {
-            a.iter()
-                .filter_map(|s| {
-                    let url = s["urls"].as_str().unwrap_or_default();
-                    // webrtc-rs 0.11 rejects the `turns:` credential form used
-                    // by UU; STUN + TURN/UDP is enough, including on the LAN.
-                    if url.starts_with("turns:") {
-                        return None;
-                    }
-                    Some(RTCIceServer {
-                        urls: vec![url.to_string()],
-                        username: s["username"].as_str().unwrap_or_default().to_string(),
-                        credential: s["credential"].as_str().unwrap_or_default().to_string(),
-                        credential_type: RTCIceCredentialType::Password,
-                    })
-                })
-                .collect()
-        })
-        .unwrap_or_default()
 }
 
 impl ControllerMedia {

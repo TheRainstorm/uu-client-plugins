@@ -1,4 +1,5 @@
 //! Real SDP/DTLS/SRTP codec negotiation and generated-video switching tests.
+use webrtc::peer_connection::configuration::RTCConfiguration;
 use super::*;
 use webrtc::rtp_transceiver::rtp_codec::RTCRtpCodecParameters;
 use webrtc::track::track_local::{TrackLocal, TrackLocalContext};

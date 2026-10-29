@@ -1,36 +1,77 @@
-name: Plugin compatibility
+name: Independent UU plugin
 on:
   push:
     branches: [main]
+    tags: ['v*']
   pull_request:
     branches: [main]
   workflow_dispatch:
 permissions:
   contents: read
 concurrency:
-  group: plugins-${{ github.ref }}
-  cancel-in-progress: true
+  group: plugin-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 jobs:
-  sdk:
+  build:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          repository: TheRainstorm/uu-client
-          ref: a0e70c16ecc8839e04159b28267109ba3ace25ea
-          path: engine
+          path: plugin-source
           persist-credentials: false
+      - name: Read pinned engine SDK
+        id: sdk
+        run: |
+          python3 - <<'PY'
+          import json,os,re
+          pin=json.load(open('plugin-source/engine-sdk.json'))
+          assert re.fullmatch('[0-9a-f]{40}',pin['revision'])
+          with open(os.environ['GITHUB_OUTPUT'],'a') as output:output.write('revision='+pin['revision']+'\n')
+          PY
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          path: engine/plugins
+          repository: TheRainstorm/uu-client
+          ref: ${{ steps.sdk.outputs.revision }}
+          path: engine
           persist-credentials: false
-      - name: Install build dependencies
+      - name: Set up independent workspace
         run: |
+          mv plugin-source engine/plugins
           sudo apt-get update
-          sudo apt-get install --no-install-recommends -y build-essential pkg-config cmake nasm libasound2-dev libpulse-dev libwayland-dev libxkbcommon-dev libpipewire-0.3-dev libclang-dev
+          sudo apt-get install --no-install-recommends -y build-essential pkg-config cmake nasm libasound2-dev libpulse-dev libwayland-dev libxkbcommon-dev libpipewire-0.3-dev libclang-dev gcc-mingw-w64-x86-64-win32 g++-mingw-w64-x86-64-win32 binutils-mingw-w64-x86-64
+          sudo update-alternatives --set x86_64-w64-mingw32-gcc /usr/bin/x86_64-w64-mingw32-gcc-win32
+          sudo update-alternatives --set x86_64-w64-mingw32-g++ /usr/bin/x86_64-w64-mingw32-g++-win32
           rustup toolchain install 1.95.0 --profile minimal --no-self-update
           rustup default 1.95.0
-      - name: Validate plugin against the pinned SDK
-        working-directory: engine
-        run: cargo test --release -p uu-compat --lib --locked
+          rustup target add x86_64-pc-windows-gnu
+      - name: Test generated media, input, defaults and lifecycle
+        working-directory: engine/plugins
+        run: cargo test --release --locked -p uu-compat --tests
+      - name: Load the actual plugin against the application SDK
+        working-directory: engine/plugins
+        run: python3 tools/package.py --target x86_64-unknown-linux-gnu --validate-only
+      - name: Package the Windows plugin only
+        working-directory: engine/plugins
+        run: python3 tools/package.py --target x86_64-pc-windows-gnu
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: eclipse-plugin-uu-windows-x64
+          path: engine/plugins/artifacts/*.zip
+  release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: eclipse-plugin-uu-windows-x64
+          path: artifacts
+      - name: Publish independent plugin release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PLUGIN_TAG: ${{ github.ref_name }}
+        run: gh release create "$PLUGIN_TAG" artifacts/*.zip --title "$PLUGIN_TAG" --notes 'Optional UU plugin. Install the matching main application separately; extract at its directory and enable manually.'

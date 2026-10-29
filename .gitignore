@@ -11,3 +11,5 @@ __pycache__/
 *.eclipse-invite.json
 gui-settings*.json
 uu-session-*.jsonl
+
+/artifacts/

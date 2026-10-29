@@ -31,6 +31,7 @@ enum Outgoing { Signal(String,Value), Close(String) }
 impl Listener {
     pub async fn online(config:&Config, development_relay:bool)->Result<Self> {
         let mut host=Host::online(config,development_relay).await?;
+        let development_relay=host.development_relay;
         Ok(Self::with_settings(host.socket.take().context("UU room socket unavailable")?,development_relay,crate::official::Settings::load(config)?))
     }
     #[cfg(test)]
