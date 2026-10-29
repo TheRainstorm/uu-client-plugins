@@ -21,7 +21,12 @@ def run(engine,extension,main_sdk,standard,sdk_metadata,target,validator):
         (addon/'plugin.json').write_text(json.dumps(manifest))
         dependencies=main_sdk.parent if main_sdk.parent.name=='deps' else main_sdk.parent/'deps'
         host=directory/'host'
-        subprocess.run(['rustc','--edition=2021','-C','prefer-dynamic','--target',target,'-L','dependency='+str(dependencies),
+        # Explicit-target Cargo builds keep proc macros in the host output tree.
+        # The SDK reexports their macros, so rustc needs both dependency roots.
+        release_directory=dependencies.parent
+        host_dependencies=(release_directory.parent.parent/'release/deps'
+                           if release_directory.parent.name==target else dependencies)
+        subprocess.run(['rustc','--edition=2021','-C','prefer-dynamic','--target',target,'-L','dependency='+str(dependencies),'-L','dependency='+str(host_dependencies),
                         '--extern','uu_plugin_sdk='+str(main_sdk),str(engine/'tools/native/plugin_probe.rs'),'-o',str(host)],check=True)
         environment=os.environ.copy();environment['LD_LIBRARY_PATH']=str(main_sdk.parent)+':'+str(standard.parent)
         subprocess.run([str(host),str(directory/'plugins'),str(directory/'config'),'uu'],env=environment,check=True)
