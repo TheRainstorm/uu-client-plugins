@@ -224,5 +224,16 @@
   "允许官方 UU 客户端连接本机": "Allow official UU clients to connect to this PC",
   "默认关闭。使用 UU 账号允许的连接，不授予 Eclipse 设备管理权限。": "Disabled by default. Uses connections authorized by the UU account and grants no Eclipse administration privileges.",
   "账号已变化，请刷新后重试": "Account changed. Refresh and try again.",
-  "优先使用点对点连接；修改中转设置后重新连接或重启共享入口生效。": "Prefer peer-to-peer connections. Reconnect or restart sharing after changing relay settings."
+  "优先使用点对点连接；修改中转设置后重新连接或重启共享入口生效。": "Prefer peer-to-peer connections. Reconnect or restart sharing after changing relay settings.",
+  "UU 兼容客户端": "UU compatibility client",
+  "UU 兼容服务器（实验性）": "UU compatibility server (experimental)",
+  "UU 插件设置": "UU plugin settings",
+  "官方 UU 客户端连接本机": "Allow official UU clients to connect to this computer",
+  "登录 UU 账号后使用已开启的功能。": "Log in to your UU account to use enabled features.",
+  "使用 UU 账号允许的连接，不授予 Eclipse 设备管理权限。": "Accept connections allowed by your UU account without granting Eclipse device administration permissions.",
+  "允许官方中转": "Allow official relay",
+  "默认关闭，只使用 UU 连接服务建立点对点连接，开启后，无法 P2P 时走官方中转": "Off by default. Use the UU connection service for peer-to-peer connections only. When enabled, use the official relay if P2P is unavailable.",
+  "模块设置已保存；现有串流继续，主机入口修改后重启服务生效。": "Module settings saved. Existing streams continue; restart the hosting service to apply entrance changes.",
+  "键盘和鼠标": "Keyboard and mouse",
+  "文本剪贴板": "Text clipboard"
 }

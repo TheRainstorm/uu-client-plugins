@@ -34,7 +34,7 @@ pub fn spawn_typed(config:Config,target:Target,geo_ip:String,stats:std::sync::Ar
     spawn_inner(config,target,geo_ip,stats,Some(client))
 }
 fn spawn_inner(config:Config,target:Target,geo_ip:String,stats:std::sync::Arc<crate::media::MediaStats>,client:Option<uu_core::client_settings::ClientSettings>)->Result<ControllerHandle> {
-    crate::require_enabled()?;
+    crate::runtime_plugin::require_client()?;
     crate::install_crypto_provider();
     stats.capabilities.set(crate::capabilities::Capabilities::ALL);
     let (typed_tx,typed_rx)=uu_core::native_input::channel(true);

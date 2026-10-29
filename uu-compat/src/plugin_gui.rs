@@ -112,6 +112,7 @@ impl PageState for Ui {
         self.poll(ui.ctx());
         match page {
             "account"=>self.account_ui(ui),
+            "server"=>self.official_ui(ui),
             "settings"=>self.settings_ui(ui),
             _=>{},
         }
@@ -159,6 +160,7 @@ mod tests {
         assert!(ui.view==View::Assistance);
         let output=ctx.run(input(Vec::new()),|ctx|{ui.show_navigation(ctx,"devices");});let labels=texts(&output);
         assert!(labels.iter().any(|(s,_)|s=="识别分享文本"));assert!(labels.iter().any(|(s,_)|s=="发起远程协助"));
+        assert!(!labels.iter().any(|(s,_)|s=="连接原生设备"||s=="让别人连接本机"||s=="添加设备"));
     }
     #[test]
     fn account_card_has_original_controls_and_no_assistance_form() {
@@ -166,7 +168,31 @@ mod tests {
         let draw=|ctx:&egui::Context,owned:&mut Owned|{egui::CentralPanel::default().show(ctx,|ui|{owned.ui.show(ui,"account");});};
         let _=ctx.run(Default::default(),|ctx|draw(ctx,&mut owned));let out=ctx.run(Default::default(),|ctx|draw(ctx,&mut owned));let labels=texts(&out);
         for label in ["UU 本机名称","账号状态：已登录","登出 UU 账号","管理 UU 设备"] {assert!(labels.iter().any(|(s,_)|s==label),"{label}");}
-        assert!(!labels.iter().any(|(s,_)|s.contains("通过设备 ID 和验证码连接")||s=="设备验证码"));
+        assert!(!labels.iter().any(|(s,_)|s.contains("通过设备 ID 和验证码连接")||s=="设备验证码"||s.contains("官方 UU 客户端连接本机")));
+    }
+    #[test]
+    fn module_settings_and_server_permissions_are_visible_without_disclosure() {
+        let mut owned=owned();let ctx=egui::Context::default();uu_plugin_sdk::theme::apply(&ctx);
+        let input=||egui::RawInput{screen_rect:Some(egui::Rect::from_min_size(egui::Pos2::ZERO,egui::vec2(1100.,1000.))),..Default::default()};
+        for (page,expected) in [("settings",vec!["UU 兼容客户端","UU 兼容服务器（实验性）","UU 账号连接服务","允许官方中转"]),("server",vec!["官方 UU 客户端连接本机","键盘和鼠标","共享系统声音","文本剪贴板","保存兼容设置"])] {
+            let draw=|ctx:&egui::Context,owned:&mut Owned|{egui::CentralPanel::default().show(ctx,|ui|{owned.ui.show(ui,page);});};
+            let _=ctx.run(input(),|ctx|draw(ctx,&mut owned));let output=ctx.run(input(),|ctx|draw(ctx,&mut owned));let labels=texts(&output);
+            for wanted in expected{assert!(labels.iter().any(|(s,_)|s==wanted),"{page}: {wanted}");}
+        }
+    }
+    #[test]
+    fn module_checkboxes_persist_only_the_selected_capability() {
+        let mut owned=owned();let ctx=egui::Context::default();uu_plugin_sdk::theme::apply(&ctx);
+        let input=|events|egui::RawInput{screen_rect:Some(egui::Rect::from_min_size(egui::Pos2::ZERO,egui::vec2(1100.,1000.))),events,..Default::default()};
+        let draw=|ctx:&egui::Context,owned:&mut Owned|{egui::CentralPanel::default().show(ctx,|ui|{owned.ui.show(ui,"settings");});};
+        for (label,wanted) in [("UU 兼容客户端",crate::modules::Modules{client:false,server:false,account:true}),("UU 兼容服务器（实验性）",crate::modules::Modules{client:false,server:true,account:true}),("UU 账号连接服务",crate::modules::Modules{client:false,server:true,account:false})] {
+            let _=ctx.run(input(Vec::new()),|ctx|draw(ctx,&mut owned));let output=ctx.run(input(Vec::new()),|ctx|draw(ctx,&mut owned));
+            let labels=texts(&output);let pos=labels.iter().find(|(s,_)|s==label).unwrap().1;
+            let pointer=|pressed|egui::Event::PointerButton{pos,button:egui::PointerButton::Primary,pressed,modifiers:Default::default()};
+            let _=ctx.run(input(vec![egui::Event::PointerMoved(pos),pointer(true)]),|ctx|draw(ctx,&mut owned));
+            let _=ctx.run(input(vec![pointer(false)]),|ctx|draw(ctx,&mut owned));
+            let preferences=owned.ui.context.preferences().unwrap();assert_eq!(crate::modules::Modules::from_preferences(&preferences).unwrap(),wanted);assert!(!preferences.enabled);
+        }
     }
     #[test]
     fn watch_mode_preserves_the_plugin_target_and_opaque_launch_contract() {

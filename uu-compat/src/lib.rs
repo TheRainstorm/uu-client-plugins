@@ -2,6 +2,7 @@
 extern crate self as uu_compat;
 pub mod api;
 mod runtime_plugin;
+mod modules;
 mod plugin_gui;
 mod login;
 mod account;
@@ -51,20 +52,28 @@ pub fn require_enabled()->anyhow::Result<()> {
 struct Service {context:uu_plugin_sdk::Context}
 #[async_trait::async_trait]
 impl uu_core::plugins::ConnectionService for Service {
+    fn visible(&self)->bool {runtime_plugin::modules().account}
+    fn host_required(&self)->bool {runtime_plugin::modules().server}
     fn descriptor(&self) -> uu_core::plugins::Descriptor {
-        uu_core::plugins::Descriptor { id: "uu", name: uu_i18n::text("UU 账号连接服务"), version: env!("CARGO_PKG_VERSION") }
+        uu_core::plugins::Descriptor { id: "uu", name: if runtime_plugin::modules().account{uu_i18n::text("UU 账号连接服务")}else{uu_i18n::text("UU 兼容服务器（实验性）")}, version: env!("CARGO_PKG_VERSION") }
     }
     async fn devices(&self,_config:&Config)->anyhow::Result<Vec<uu_core::plugins::RemoteDevice>> {
+        runtime_plugin::require_account()?;
         runtime_plugin::devices(&self.context.data).await
     }
     async fn join(&self, config: &Config, device: &str, relay: bool) -> anyhow::Result<uu_core::internet::Connection> {
+        runtime_plugin::require_account()?;
         connection::join(&self.context.data, device, runtime_plugin::relay(&self.context)?).await
     }
     async fn host(&self, config: &Config, relay: bool) -> anyhow::Result<Box<dyn uu_core::plugins::Listener>> {
+        runtime_plugin::require_account()?;
         account::Listener::bind(Box::new(connection::Host::online(&self.context.data, runtime_plugin::relay(&self.context)?).await?),&self.context.data)
     }
     async fn listen(&self, config: &Config, relay: bool) -> anyhow::Result<Box<dyn uu_core::plugins::Listener>> {
-        account::Listener::bind(Box::new(connection::Listener::online(&self.context.data, runtime_plugin::relay(&self.context)?).await?),&self.context.data)
+        require_enabled()?;
+        anyhow::ensure!(runtime_plugin::modules().connection(),"UU connection modules are disabled");
+        let native=runtime_plugin::modules().account&&uu_core::device_book::Store::open(config.at("device-trust"))?.read()?.sharing.plugin_services.iter().any(|id|id==&self.context.id);
+        account::Listener::bind(Box::new(connection::Listener::online_with_native(&self.context.data, runtime_plugin::relay(&self.context)?,native).await?),&self.context.data)
     }
 }
 #[async_trait::async_trait]

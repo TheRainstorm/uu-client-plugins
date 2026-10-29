@@ -6,6 +6,12 @@ Download a plugin ZIP matching your application's SDK, extract it at the applica
 
 The plugin owns QR login, account devices, favorites, assistance requests, rendezvous, the UU controller protocol and the optional official-client host adapter. Settings and accounts live under the application's data directory in `plugins/uu/`. Legacy account migration occurs only after explicit enablement, preserving originals. Official relay defaults off; the supported optional relay transport is TURN/UDP. TURN/TCP and TURN/TLS are not implemented. Official mobile desktop interoperability still requires real-device acceptance; generated media tests do not establish it.
 
+## Modules
+
+After enabling the plugin, select its three modules independently in Settings → Plugins. The compatibility client and account connection service default on; the experimental compatibility server defaults off. Explicit module choices persist across restarts and upgrades. The client adds the “UU compatibility client” toolbar entry, the account service supplies native Eclipse rendezvous and account settings, and the experimental server exposes its permissions directly in Service management. Their shared transport does not publish a disabled native entrance. Disabling a module preserves existing streams; restart hosting to apply changed entrance settings and permissions.
+
+The compatibility server module controls official UU connection admission. The legacy enable flag in `host.json` does not enable that module; control, audio and clipboard permissions remain in that file. Remote assistance contains only the official device ID and verification-code flow. Native pairing stays in Eclipse's own device and service pages.
+
 ## Build
 
 Read `engine-sdk.json`, check out its exact engine revision, and place this repository at `<engine>/plugins`. It is a separate Cargo workspace with its own lock. Use the pinned Rust toolchain and matching target/features; this native SDK does not promise a stable Rust ABI.

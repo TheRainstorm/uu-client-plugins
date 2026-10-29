@@ -26,11 +26,6 @@ impl Ui {
             }}
             ui.label(egui::RichText::new(uu_i18n::text("需登录 UU 账号。验证码只用于本次连接，不保存为设备授权。")).color(theme::MUTED));
         });
-        ui.add_space(12.);
-        ui.collapsing(uu_i18n::text("连接原生设备"),|ui| {
-            ui.label(uu_i18n::text("主机启动服务后即可配对。控制端添加 IP、UU 或 VPS 设备并连接，可选择配对码、密码、临时配对码，或使用主机预先授权的公钥。"));
-            if ui.button(uu_i18n::text("添加设备")).clicked(){actions.push(Action::OpenDevices);}
-            if ui.button(uu_i18n::text("让别人连接本机")).clicked(){actions.push(Action::OpenSharing);}
-        });actions
+        actions
     }
 }

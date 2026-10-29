@@ -1,12 +1,17 @@
 //! Everything identifying this service stays in its separately built library.
 use anyhow::{ensure,Result};
-use std::sync::{Arc,atomic::{AtomicBool,Ordering}};
+use std::sync::{Arc,atomic::{AtomicBool,AtomicU8,Ordering}};
 use uu_plugin_sdk::{Context,Plugin,Page,Placement,PageState};
 use uu_core::{Config,client_settings::ClientSettings};
 // Unit tests run only generated media and owned protocol fixtures. Production
 // and integration-test builds always start disabled.
 static ENABLED:AtomicBool=AtomicBool::new(cfg!(test));
 static CONTEXT:std::sync::OnceLock<Context>=std::sync::OnceLock::new();
+static MODULES:AtomicU8=AtomicU8::new(5);
+pub fn modules()->super::modules::Modules {super::modules::Modules::from_bits(MODULES.load(Ordering::Acquire))}
+pub fn require_client()->Result<()> {super::require_enabled()?;ensure!(modules().client,"UU compatibility client is disabled");Ok(())}
+pub fn require_account()->Result<()> {super::require_enabled()?;ensure!(modules().account,"UU account connection service is disabled");Ok(())}
+pub fn admits(native:bool)->bool {enabled()&&modules().admits(native)}
 pub fn enabled()->bool {ENABLED.load(Ordering::Acquire)}
 pub fn allow_relay()->Result<bool> {relay(CONTEXT.get().ok_or_else(||anyhow::anyhow!("UU plugin context unavailable"))?)}
 pub fn relay(context:&Context)->Result<bool> {
@@ -25,16 +30,17 @@ pub extern "C" fn eclipse_plugin_entry_v1()->*const uu_plugin_sdk::Entry {
     static ENTRY:uu_plugin_sdk::Entry=uu_plugin_sdk::entry(create);&ENTRY
 }
 impl Plugin for Extension {
+    fn configure(&self,preferences:&uu_core::plugins::PluginPreferences)->Result<()> {
+        MODULES.store(super::modules::Modules::from_preferences(preferences)?.bits(),Ordering::Release);Ok(())
+    }
+    fn connection_enabled(&self)->bool {modules().connection()}
     fn client_support(&self)->uu_plugin_sdk::ClientSupport {uu_plugin_sdk::ClientSupport{host_managed_bitrate:true,max_fps:144,codecs:vec![uu_core::native::VideoCodec::H264,uu_core::native::VideoCodec::Hevc]}}
     fn set_enabled(&self,value:bool)->Result<()> {
         if value {migrate(&self.context)?;}
         ENABLED.store(value,Ordering::Release);Ok(())
     }
     fn pages(&self)->Vec<Page> {
-        vec![Page{id:"devices".into(),title:uu_i18n::text("UU 兼容").into(),placement:Placement::Navigation,
-                icon:Some(uu_plugin_sdk::ui::Icon::Image{id:"uu-service-mark",bytes:include_bytes!("../assets/uu-remote.ico")})},
-            Page{id:"account".into(),title:uu_i18n::text("UU 账号连接服务").into(),placement:Placement::Connections,icon:None},
-            Page{id:"settings".into(),title:uu_i18n::text("UU 兼容").into(),placement:Placement::Settings,icon:None}]
+        pages(modules())
     }
     fn gui(&self)->Result<Box<dyn PageState>> {Ok(Box::new(super::plugin_gui::Ui::new(self.context.clone())?))}
     fn service(&self)->Option<Arc<dyn uu_core::plugins::ConnectionService>> {Some(Arc::new(super::Service{context:self.context.clone()}))}
@@ -54,7 +60,7 @@ impl Plugin for Extension {
         super::private_file::write_atomic(&path,&serde_json::to_vec_pretty(&settings)?)?;Ok(())
     }
     fn connect(&self,target:zeroize::Zeroizing<String>,client:ClientSettings,stats:Arc<uu_core::media::MediaStats>)->Result<uu_core::controller::ControllerHandle> {
-        super::require_enabled()?;client.validate()?;
+        require_client()?;client.validate()?;
         ensure!(client.fps<=144,"UU supports at most 144 FPS");
         ensure!(!matches!(client.codec,uu_core::client_settings::CodecPreference::Av1|uu_core::client_settings::CodecPreference::Pyrowave),"UU does not support the selected codec");
         let target:Target=serde_json::from_str(&target).map_err(|_|anyhow::anyhow!("invalid UU connection target"))?;
@@ -67,6 +73,14 @@ impl Plugin for Extension {
         super::controller::spawn_typed(self.context.data.clone(),target,super::config::geo_exit_ip(),stats,client)
     }
     fn cli(&self,arguments:Vec<String>)->Result<()> {super::require_enabled()?;super::cli::run(self.context.data.clone(),arguments)}
+}
+fn pages(modules:super::modules::Modules)->Vec<Page> {
+    let mut pages=Vec::new();
+    if modules.client {pages.push(Page{id:"devices".into(),title:uu_i18n::text("UU 兼容客户端").into(),placement:Placement::Navigation,
+        icon:Some(uu_plugin_sdk::ui::Icon::Image{id:"uu-service-mark",bytes:include_bytes!("../assets/uu-remote.ico")})});}
+    if modules.account {pages.push(Page{id:"account".into(),title:uu_i18n::text("UU 账号连接服务").into(),placement:Placement::Connections,icon:None});}
+    if modules.server {pages.push(Page{id:"server".into(),title:uu_i18n::text("UU 兼容服务器（实验性）").into(),placement:Placement::Services,icon:None});}
+    pages.push(Page{id:"settings".into(),title:uu_i18n::text("UU 插件设置").into(),placement:Placement::Settings,icon:None});pages
 }
 #[derive(serde::Deserialize,serde::Serialize)]
 #[serde(tag="kind",rename_all="snake_case",deny_unknown_fields)]
@@ -130,6 +144,18 @@ fn migrate(context:&Context)->Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn page_roles_follow_each_module_without_renaming_the_client() {
+        for bits in 0..8 {
+            let modules=crate::modules::Modules::from_bits(bits);let pages=pages(modules);
+            assert_eq!(pages.iter().any(|p|p.id=="devices"),modules.client);
+            assert_eq!(pages.iter().any(|p|p.id=="account"),modules.account);
+            assert_eq!(pages.iter().any(|p|p.id=="server"),modules.server);
+            assert!(pages.iter().any(|p|p.id=="settings"));
+            if let Some(client)=pages.iter().find(|p|p.id=="devices") {assert_eq!(client.title,"UU 兼容客户端");assert!(client.icon.is_some());}
+            if let Some(server)=pages.iter().find(|p|p.id=="server") {assert_eq!(server.placement,Placement::Services);}
+        }
+    }
     #[test]
     fn explicit_migration_preserves_accounts_unknown_routes_and_default_opt_out() {
         use uu_core::device_book::{Destination,Profile,Store};

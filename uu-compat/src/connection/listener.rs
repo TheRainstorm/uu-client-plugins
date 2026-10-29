@@ -30,15 +30,27 @@ impl Pending {
 enum Outgoing { Signal(String,Value), Close(String) }
 impl Listener {
     pub async fn online(config:&Config, development_relay:bool)->Result<Self> {
+        Self::online_with_native(config,development_relay,true).await
+    }
+    pub(crate) async fn online_with_native(config:&Config,development_relay:bool,native:bool)->Result<Self> {
         let mut host=Host::online(config,development_relay).await?;
         let development_relay=host.development_relay;
-        Ok(Self::with_settings(host.socket.take().context("UU room socket unavailable")?,development_relay,crate::official::Settings::load(config)?))
+        let settings=crate::official::Settings::for_module(config,crate::runtime_plugin::modules().server)?;
+        Ok(Self::start(host.socket.take().context("UU room socket unavailable")?,development_relay,settings,native,crate::runtime_plugin::admits))
     }
     #[cfg(test)]
     fn from_socket(socket:SocketIo,development_relay:bool)->Self {
         Self::with_settings(socket,development_relay,crate::official::Settings::default())
     }
-    fn with_settings(mut socket:SocketIo,development_relay:bool,settings:crate::official::Settings)->Self {
+    #[cfg(test)]
+    fn with_settings(socket:SocketIo,development_relay:bool,settings:crate::official::Settings)->Self {
+        Self::with_policy(socket,development_relay,settings,true)
+    }
+    #[cfg(test)]
+    fn with_policy(socket:SocketIo,development_relay:bool,settings:crate::official::Settings,native:bool)->Self {
+        Self::start(socket,development_relay,settings,native,|_|true)
+    }
+    fn start(mut socket:SocketIo,development_relay:bool,settings:crate::official::Settings,native:bool,admission:fn(bool)->bool)->Self {
         let (outgoing,mut requests)=mpsc::channel(128);
         let (accepted,incoming)=mpsc::channel(crate::shared_host::MAX_SESSIONS);
         let task=tokio::spawn(async move {
@@ -98,6 +110,7 @@ impl Listener {
                             let request=pending.remove(index);
                             let Ok(sdp)=description(body,&attachments) else{continue;};
                             let private=sdp.lines().any(|l|l.starts_with("a=x-eclipse-"));
+                            if (private&&!native)||!admission(private){continue;}
                             let (first,official)=if private {
                                 let Ok(message)=unpack_sdp(&sdp) else{continue;};(message,false)
                             }else {
@@ -206,6 +219,23 @@ mod tests {
             }
             listener.close().await;drop(commands);timeout(Duration::from_secs(2),server).await.unwrap().unwrap();
         }
+    }
+    #[tokio::test(flavor="multi_thread",worker_threads=2)]
+    async fn native_and_official_admission_are_independent_on_one_room_socket() {
+        for native in [false,true] {for official in [false,true] {
+            let(socket,commands,_responses,server)=fixture().await;
+            let mut listener=Listener::with_policy(socket,false,crate::official::Settings{enabled:official,..Default::default()},native);
+            for (session,sdp,accepted,is_native) in [("native",pack_sdp(envelope(1)).unwrap(),native,true),("official","v=0\r\n".to_owned(),official,false)] {
+                let header=json!({"ice_id":session,"client_id":"client","app_control_id":"control","iceServers":[],"app_data":{"_placeholder":true,"num":0}});
+                commands.send(Message::Text(format!("451-{}",json!(["be-controlled",header])).into())).await.unwrap();
+                commands.send(Message::Binary(crate::socketio::encode_app_data("generated-controller").into())).await.unwrap();
+                commands.send(event("soac",json!({"client_id":"client","data":{"ice_id":session,"app_control_id":"control","type":"offer","sdp":sdp}}))).await.unwrap();
+                let incoming=timeout(Duration::from_millis(100),listener.accept_session()).await;
+                if accepted {assert_eq!(matches!(incoming.unwrap().unwrap(),uu_core::plugins::Incoming::Native(_)),is_native);}
+                else{assert!(incoming.is_err(),"native={native}, official={official}, session={session}");}
+            }
+            listener.close().await;drop(commands);timeout(Duration::from_secs(2),server).await.unwrap().unwrap();
+        }}
     }
     #[tokio::test(flavor="multi_thread",worker_threads=2)]
     async fn room_routes_two_sessions_and_releasing_one_keeps_the_other_socket_alive() {
