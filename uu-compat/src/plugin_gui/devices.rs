@@ -298,7 +298,7 @@ impl Ui {
                             ui.add(egui::Label::new(RichText::new(error).color(C::from_rgb(177, 48, 48))).wrap());
                             ui.add_space(12.0);
                             ui.label(uu_i18n::text("设备列表暂时无法获取；本次加载失败不会清除本地登录状态。"));
-                            ui.hyperlink_to(uu_i18n::text("连接凭据配置说明"), "https://github.com/TheRainstorm/uu-client/blob/master/docs/connection-credentials.md");
+                            ui.hyperlink_to(uu_i18n::text("连接凭据配置说明"), "https://github.com/TheRainstorm/eclipse/blob/master/docs/connection-credentials.md");
                             if ui.button(uu_i18n::text("重试加载设备")).clicked() {
                                 self.refresh();
                             }

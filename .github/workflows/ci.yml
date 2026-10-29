@@ -31,7 +31,7 @@ jobs:
           PY
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          repository: TheRainstorm/uu-client
+          repository: TheRainstorm/eclipse
           ref: ${{ steps.sdk.outputs.revision }}
           path: engine
           persist-credentials: false
