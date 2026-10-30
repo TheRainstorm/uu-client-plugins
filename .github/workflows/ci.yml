@@ -6,28 +6,41 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Rebuild an immutable tag with the current workspace fixture; empty builds this ref'
+        required: false
+        type: string
 permissions:
   contents: read
 concurrency:
-  group: plugin-${{ github.ref }}
-  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+  group: plugin-${{ inputs.release_tag || github.ref }}
+  cancel-in-progress: ${{ inputs.release_tag == '' && !startsWith(github.ref, 'refs/tags/') }}
 jobs:
   build:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    outputs:
+      source_commit: ${{ steps.sdk.outputs.source_commit }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
+          path: plugin-workflow
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ inputs.release_tag || github.sha }}
           path: plugin-source
           persist-credentials: false
       - name: Read pinned engine SDK
         id: sdk
         run: |
           python3 - <<'PY'
-          import json,os,re
+          import json,os,re,subprocess
           pin=json.load(open('plugin-source/engine-sdk.json'))
           assert re.fullmatch('[0-9a-f]{40}',pin['revision'])
-          with open(os.environ['GITHUB_OUTPUT'],'a') as output:output.write('revision='+pin['revision']+'\n')
+          commit=subprocess.check_output(['git','rev-parse','HEAD'],cwd='plugin-source',text=True).strip()
+          with open(os.environ['GITHUB_OUTPUT'],'a') as output:output.write('revision='+pin['revision']+'\nsource_commit='+commit+'\n')
           PY
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -50,16 +63,16 @@ jobs:
         run: cargo test --release --locked -p uu-compat --tests
       - name: Load the actual plugin against the application SDK
         working-directory: engine/plugins
-        run: python3 tools/package.py --target x86_64-unknown-linux-gnu --validate-only
+        run: python3 ../../plugin-workflow/tools/ci_package.py --source . --target x86_64-unknown-linux-gnu --validate-only
       - name: Package the Windows plugin only
         working-directory: engine/plugins
-        run: python3 tools/package.py --target x86_64-pc-windows-gnu
+        run: python3 ../../plugin-workflow/tools/ci_package.py --source . --target x86_64-pc-windows-gnu
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: eclipse-plugin-uu-windows-x64
           path: engine/plugins/artifacts/*.zip
   release:
-    if: startsWith(github.ref, 'refs/tags/')
+    if: startsWith(github.ref, 'refs/tags/') || inputs.release_tag != ''
     needs: build
     runs-on: ubuntu-24.04
     permissions:
@@ -73,12 +86,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          PLUGIN_TAG: ${{ github.ref_name }}
+          PLUGIN_TAG: ${{ inputs.release_tag || github.ref_name }}
+          SOURCE_COMMIT: ${{ needs.build.outputs.source_commit }}
         run: |
           if gh release view "$PLUGIN_TAG" --json isDraft --jq '.isDraft' > "$RUNNER_TEMP/plugin-release-state" 2>/dev/null; then
             test "$(cat "$RUNNER_TEMP/plugin-release-state")" = false
             mkdir existing
-            gh release download "$PLUGIN_TAG" --pattern "*-${GITHUB_SHA:0:12}.zip" --dir existing
+            gh release download "$PLUGIN_TAG" --pattern "*-${SOURCE_COMMIT:0:12}.zip" --dir existing
             python3 - <<'PY'
           import hashlib,json,pathlib,zipfile
           current=list(pathlib.Path('artifacts').glob('*.zip'))
