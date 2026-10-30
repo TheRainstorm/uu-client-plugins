@@ -3,7 +3,7 @@ resolver = "2"
 members = ["uu-compat"]
 
 [workspace.package]
-version = "0.21.0"
+version = "0.21.1"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 
