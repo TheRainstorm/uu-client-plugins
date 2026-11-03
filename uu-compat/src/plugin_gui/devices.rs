@@ -2,14 +2,15 @@
 use super::*;
 use uu_plugin_sdk::ui::{Icon,icon,icon_button,icon_button_selected};
 use egui::{Color32 as C,Pos2,Rect,RichText,Sense,Stroke,Vec2};
-use uu_plugin_sdk::theme::{ACCENT as BLUE,INK,MUTED,SIDEBAR};
+use uu_plugin_sdk::theme;
 fn text_at(p:&egui::Painter,pos:Pos2,text:impl Into<String>,size:f32,color:C) {p.text(pos,egui::Align2::LEFT_CENTER,text.into(),egui::FontId::proportional(size),color);}
 fn online(status:&str)->bool {matches!(status,"CONNECTED"|"ready"|"ONLINE")}
 impl Ui {
     pub(super) fn navigation(&mut self, ctx: &egui::Context) {
+        let palette=*theme::palette(&ctx.style().visuals);
         if let Some(error) = self.account_error.clone() {
             egui::TopBottomPanel::top("local-account-error").show(ctx, |ui| {
-                ui.add(egui::Label::new(RichText::new(error).color(C::from_rgb(177, 48, 48))).wrap());
+                ui.add(egui::Label::new(RichText::new(error).color(palette.danger)).wrap());
                 if ui.button(uu_i18n::text("检查配置后重试")).clicked() { self.account_error=None; }
             });
         }
@@ -19,7 +20,7 @@ impl Ui {
                     ui.add_space(38.0);
                     ui.heading(uu_i18n::text("连接你的每一台设备"));
                     ui.add_space(12.0);
-                    ui.label(RichText::new(uu_i18n::text("登录 UU 账号访问官方设备；点击左上角标志返回原生设备页")).color(MUTED));
+                    ui.label(RichText::new(uu_i18n::text("登录 UU 账号访问官方设备；点击左上角标志返回原生设备页")).color(palette.muted));
                     ui.add_space(24.0);
                     ui.label(uu_i18n::text("UU 本机名称"));
                     ui.monospace(crate::config::uu_device_name());
@@ -32,14 +33,14 @@ impl Ui {
                         ui.add(egui::Spinner::new().size(28.0));ui.add_space(14.0);
                     }
                     if !self.notice.is_empty(){ui.label(&self.notice);ui.add_space(10.0);}
-                    if ui.add_enabled_ui(self.account_error.is_none(), |ui| ui.add_sized([180.0,36.0],egui::Button::new(RichText::new(if self.qr.is_some(){uu_i18n::text("刷新二维码")}else{uu_i18n::text("扫码登录")}).color(C::WHITE)).fill(BLUE))).inner.clicked(){self.start_login();}
+                    if ui.add_enabled_ui(self.account_error.is_none(), |ui| ui.add_sized([180.0,36.0],theme::primary_button(if self.qr.is_some(){uu_i18n::text("刷新二维码")}else{uu_i18n::text("扫码登录")}))).inner.clicked(){self.start_login();}
                     if self.login.is_some()&&ui.button(uu_i18n::text("取消登录")).clicked(){self.login=None;self.qr=None;self.notice=uu_i18n::text("已取消登录").into();}
                     ui.add_space(14.0);
                     ui.add_space(8.0);
                     if ui.add_sized([180.0,32.0],egui::Button::new(if false{uu_i18n::text("管理当前共享")}else{uu_i18n::text("共享此设备")})).clicked(){self.actions.push(Action::OpenSharing);}
                     ui.add_space(8.0);
                     ui.small(uu_i18n::text("原生 IP 直连无需账号；旧邀请文件仍可拖入窗口"));
-                    if !self.notice.is_empty(){ui.add_space(16.0);ui.label(RichText::new(&self.notice).color(MUTED));}
+                    if !self.notice.is_empty(){ui.add_space(16.0);ui.label(RichText::new(&self.notice).color(palette.muted));}
                 });
             });
             return;
@@ -55,14 +56,14 @@ impl Ui {
             .resizable(false)
             .frame(
                 egui::Frame::none()
-                    .fill(SIDEBAR)
+                    .fill(palette.sidebar)
                     .inner_margin(egui::Margin::same(10.0)),
             )
             .show(ctx, |ui| {
                 if !compact_home {
                 let (card, _) =
                     ui.allocate_exact_size(egui::vec2(ui.available_width(), 108.0), Sense::hover());
-                ui.painter().rect_filled(card, 5.0, BLUE);
+                ui.painter().rect_filled(card, theme::RADIUS, palette.primary);
                 text_at(
                     ui.painter(),
                     card.left_top() + egui::vec2(18.0, 38.0),
@@ -84,7 +85,7 @@ impl Ui {
                         ui.painter(),
                         Rect::from_min_size(ui.cursor().min, Vec2::splat(22.0)),
                         Icon::Desktop,
-                        INK,
+                        palette.text,
                     );
                     ui.add_space(28.0);
                     if compact_home {
@@ -123,15 +124,11 @@ impl Ui {
                                 Sense::click(),
                             );
                             let active = self.selected == Some(index);
-                            if active || response.hovered() {
+                            if active || response.hovered() || response.is_pointer_button_down_on() {
                                 ui.painter().rect_filled(
                                     row,
                                     5.0,
-                                    if active {
-                                        C::from_rgb(225, 232, 238)
-                                    } else {
-                                        C::from_rgb(232, 239, 244)
-                                    },
+                                    if response.is_pointer_button_down_on(){palette.pressed}else if active {palette.tint}else{palette.hover},
                                 );
                             }
                             if active {
@@ -141,16 +138,16 @@ impl Ui {
                                         egui::vec2(3.0, 20.0),
                                     ),
                                     2.0,
-                                    BLUE,
+                                    palette.accent,
                                 );
                             }
                             ui.painter().circle_filled(
                                 row.left_center() + egui::vec2(17.0, 0.0),
                                 3.5,
                                 if online(&device.status) {
-                                    C::from_rgb(46, 202, 83)
+                                    palette.success
                                 } else {
-                                    C::from_rgb(182, 187, 194)
+                                    palette.muted
                                 },
                             );
                             let tile = Rect::from_center_size(
@@ -161,20 +158,20 @@ impl Ui {
                                 tile,
                                 5.0,
                                 if online(&device.status) {
-                                    BLUE
+                                    palette.primary
                                 } else {
-                                    C::from_rgb(178, 183, 190)
+                                    palette.disabled
                                 },
                             );
-                            icon(ui.painter(), tile.shrink(4.0), Icon::Grid, C::WHITE);
-                            let color = if online(&device.status) { INK } else { MUTED };
+                            icon(ui.painter(), tile.shrink(4.0), Icon::Grid, if online(&device.status){C::WHITE}else{palette.muted});
+                            let color = if online(&device.status) { palette.text } else { palette.muted };
                             let mut job = egui::text::LayoutJob::simple(device.alias.clone(), egui::FontId::proportional(15.0), color, (row.width()-91.0).max(20.0));
                             job.wrap.max_rows = 1; job.wrap.break_anywhere = true;
                             let galley = ui.painter().layout_job(job);
                             let origin = row.left_center() + egui::vec2(66.0, -galley.size().y/2.0);
                             ui.painter().with_clip_rect(row).galley(origin, galley, color);
                             if self.library.is_favorite(&device.device_id) {
-                                icon(ui.painter(), Rect::from_center_size(row.right_center()-egui::vec2(13.0,0.0), Vec2::splat(16.0)), Icon::Star, BLUE);
+                                icon(ui.painter(), Rect::from_center_size(row.right_center()-egui::vec2(13.0,0.0), Vec2::splat(16.0)), Icon::Star, palette.accent);
                             }
                             if response.clicked() {
                                 selected = Some(index);
@@ -203,7 +200,7 @@ impl Ui {
                         egui::vec2(ui.available_width(), 34.0),
                         Sense::click(),
                     );
-                    if active || response.hovered() { ui.painter().rect_filled(row, 5.0, C::from_rgb(225, 235, 247)); }
+                    if active || response.hovered() || response.is_pointer_button_down_on() { ui.painter().rect_filled(row, theme::RADIUS, if response.is_pointer_button_down_on(){palette.pressed}else if response.hovered(){palette.hover}else{palette.tint}); }
                     icon(
                         ui.painter(),
                         Rect::from_center_size(
@@ -211,14 +208,14 @@ impl Ui {
                             Vec2::splat(22.0),
                         ),
                         kind,
-                        if active { BLUE } else { MUTED },
+                        if active { palette.accent } else { palette.muted },
                     );
                     text_at(
                         ui.painter(),
                         row.left_center() + egui::vec2(55.0, 0.0),
                         label,
                         15.0,
-                        INK,
+                        palette.text,
                     );
                     if response.clicked() {
                         self.view =
@@ -235,8 +232,8 @@ impl Ui {
                     egui::vec2(ui.available_width(), 34.0),
                     Sense::click(),
                 );
-                if assistance_active || response.hovered() {
-                    ui.painter().rect_filled(row, 5.0, C::from_rgb(225, 235, 247));
+                if assistance_active || response.hovered() || response.is_pointer_button_down_on() {
+                    ui.painter().rect_filled(row, theme::RADIUS, if response.is_pointer_button_down_on(){palette.pressed}else if response.hovered(){palette.hover}else{palette.tint});
                 }
                 icon(
                     ui.painter(),
@@ -245,20 +242,20 @@ impl Ui {
                         Vec2::splat(22.0),
                     ),
                     Icon::Link,
-                    if assistance_active { BLUE } else { MUTED },
+                    if assistance_active { palette.accent } else { palette.muted },
                 );
                 text_at(
                     ui.painter(),
                     row.left_center() + egui::vec2(55.0, 0.0),
                     uu_i18n::text("远程协助"),
                     15.0,
-                    INK,
+                    palette.text,
                 );
                 if response.clicked() {
                     self.view =
                         View::Assistance;
                 }
-                if let Some(notice) = self.library.notice() { ui.add_space(6.0); ui.label(RichText::new(notice).small().color(MUTED)); }
+                if let Some(notice) = self.library.notice() { ui.add_space(6.0); ui.label(RichText::new(notice).small().color(palette.muted)); }
 
             });
         if self.view
@@ -268,13 +265,13 @@ impl Ui {
             egui::CentralPanel::default()
                 .frame(
                     egui::Frame::none()
-                        .fill(C::from_rgb(248, 251, 253))
+                        .fill(palette.base)
                         .inner_margin(egui::Margin::symmetric(36.0, 26.0)),
                 )
                 .show(ctx, |ui| {
                     egui::ScrollArea::vertical().show(ui, |ui| {
                         ui.heading(uu_i18n::text("远程协助"));
-                        ui.label(RichText::new(uu_i18n::text("通过临时邀请帮助另一台设备")).color(MUTED));
+                        ui.label(RichText::new(uu_i18n::text("通过临时邀请帮助另一台设备")).color(palette.muted));
                         ui.add_space(18.0);
                         actions = self.assistance(ui);
                     });
@@ -285,7 +282,7 @@ impl Ui {
         egui::CentralPanel::default()
             .frame(
                 egui::Frame::none()
-                    .fill(C::from_rgb(248, 251, 253))
+                    .fill(palette.base)
                     .inner_margin(egui::Margin::symmetric(36.0, 26.0)),
             )
             .show(ctx, |ui| {
@@ -295,7 +292,7 @@ impl Ui {
                         if let Some(error) = &self.list_error {
                             ui.heading(uu_i18n::text("设备加载失败"));
                             ui.add_space(12.0);
-                            ui.add(egui::Label::new(RichText::new(error).color(C::from_rgb(177, 48, 48))).wrap());
+                            ui.add(egui::Label::new(RichText::new(error).color(palette.danger)).wrap());
                             ui.add_space(12.0);
                             ui.label(uu_i18n::text("设备列表暂时无法获取；本次加载失败不会清除本地登录状态。"));
                             ui.hyperlink_to(uu_i18n::text("连接凭据配置说明"), "https://github.com/TheRainstorm/eclipse/blob/master/docs/connection-credentials.md");
@@ -325,25 +322,7 @@ impl Ui {
                     let device = self.devices[index].clone();
                     let is_online = online(&device.status);
                     ui.horizontal(|ui| {
-                        let (pill, _) =
-                            ui.allocate_exact_size(egui::vec2(61.0, 27.0), Sense::hover());
-                        ui.painter().rect_filled(pill, 14.0, INK);
-                        ui.painter().circle_filled(
-                            pill.left_center() + egui::vec2(13.0, 0.0),
-                            4.0,
-                            if is_online {
-                                C::from_rgb(0, 225, 168)
-                            } else {
-                                MUTED
-                            },
-                        );
-                        text_at(
-                            ui.painter(),
-                            pill.left_center() + egui::vec2(24.0, 0.0),
-                            if is_online { uu_i18n::text("在线") } else { uu_i18n::text("离线") },
-                            13.0,
-                            C::WHITE,
-                        );
+                        theme::pill(ui,if is_online {uu_i18n::text("在线")}else{uu_i18n::text("离线")},if is_online {theme::Tone::Success}else{theme::Tone::Neutral});
                         ui.add_space(5.0);
                         let title_width = (ui.available_width()-96.0).max(24.0);
                         ui.allocate_ui_with_layout(egui::vec2(title_width, 40.0), egui::Layout::left_to_right(egui::Align::Center), |ui| ui.add(egui::Label::new(RichText::new(&device.alias)
@@ -353,7 +332,7 @@ impl Ui {
                                 } else {
                                     29.0
                                 })
-                                .color(INK)).truncate())).inner.on_hover_text(&device.alias);
+                                .color(palette.text)).truncate())).inner.on_hover_text(&device.alias);
                         let favorite = self.library.is_favorite(&device.device_id);
                         if icon_button_selected(ui, Icon::Star, if favorite { uu_i18n::text("取消收藏") } else { uu_i18n::text("收藏设备") }, favorite).clicked() {
                             self.library.toggle_favorite(&device.device_id);
@@ -380,14 +359,14 @@ impl Ui {
                         ui.painter().image(texture.id(), hero, uv, C::WHITE);
                     } else {
                         ui.painter()
-                            .rect_filled(hero, 7.0, C::from_rgb(169, 211, 250));
+                            .rect_filled(hero, theme::RADIUS, palette.tint);
                         for n in (0..7).rev() {
                             let center =
                                 hero.center() + egui::vec2(n as f32 * 24.0 - 50.0, n as f32 * 8.0);
                             ui.painter().with_clip_rect(hero).circle_stroke(
                                 center,
                                 hero.height() * 0.44 + n as f32 * 12.0,
-                                Stroke::new(22.0, C::from_rgb(65 + n * 9, 133 + n * 8, 243)),
+                                Stroke::new(22.0, palette.accent.gamma_multiply(0.18+n as f32*0.04)),
                             );
                         }
                     }
@@ -405,7 +384,7 @@ impl Ui {
                     ui.painter().rect_filled(
                         enter,
                         24.0,
-                        C::from_black_alpha(if response.hovered() { 130 } else { 90 }),
+                        C::from_black_alpha(if response.is_pointer_button_down_on(){160}else if response.hovered(){130}else{90}),
                     );
                     ui.painter().text(
                         enter.center(),
@@ -423,12 +402,12 @@ impl Ui {
                     }
                     ui.add_space(0.0);
                     egui::Frame::none()
-                        .stroke(Stroke::new(1.0, C::from_rgb(216, 222, 228)))
+                        .stroke(Stroke::new(1.0, palette.border))
                         .rounding(egui::Rounding {
                             nw: 0.0,
                             ne: 0.0,
-                            sw: 7.0,
-                            se: 7.0,
+                            sw: theme::RADIUS,
+                            se: theme::RADIUS,
                         })
                         .inner_margin(egui::Margin::symmetric(4.0, 12.0))
                         .show(ui, |ui| {
@@ -450,9 +429,9 @@ impl Ui {
                                         },
                                     );
                                     let color = if enabled {
-                                        INK
+                                        palette.text
                                     } else {
-                                        C::from_rgb(167, 175, 184)
+                                        palette.muted
                                     };
                                     icon(
                                         ui.painter(),
@@ -486,12 +465,12 @@ impl Ui {
                             });
                         });
                     ui.add_space(24.0);
-                    ui.label(RichText::new(uu_i18n::text("快速启动")).size(17.0).color(MUTED));
+                    ui.label(RichText::new(uu_i18n::text("快速启动")).size(17.0).color(palette.muted));
                     ui.add_space(11.0);
                     let (quick, response) =
                         ui.allocate_exact_size(egui::vec2(width, 115.0), Sense::click());
                     // Fine dashes match the reference's quiet empty-state card.
-                    let stroke = Stroke::new(1.0, C::from_rgb(214, 222, 230));
+                    let stroke = Stroke::new(1.0, palette.control_border);
                     for x in (0..width as usize).step_by(14) {
                         let x = quick.left() + x as f32;
                         ui.painter().line_segment(
@@ -523,27 +502,27 @@ impl Ui {
                     }
                     let center = quick.center() - egui::vec2(0.0, 10.0);
                     ui.painter()
-                        .circle_filled(center, 22.0, C::from_rgb(232, 238, 243));
+                        .circle_filled(center, 22.0, palette.control);
                     ui.painter().text(
                         center,
                         egui::Align2::CENTER_CENTER,
                         "+",
                         egui::FontId::proportional(30.0),
-                        MUTED,
+                        palette.muted,
                     );
                     ui.painter().text(
                         center + egui::vec2(0.0, 38.0),
                         egui::Align2::CENTER_CENTER,
                         uu_i18n::text("连接此设备"),
                         egui::FontId::proportional(13.0),
-                        INK,
+                        palette.text,
                     );
                     if response.clicked() && is_online && device.controllable {
                         self.view_only = false;
                         self.connect_device();
                     }
                     ui.add_space(16.0);
-                    ui.label(RichText::new(&self.notice).size(12.0).color(MUTED));
+                    ui.label(RichText::new(&self.notice).size(12.0).color(palette.muted));
                 });
             });
     }

@@ -171,6 +171,23 @@ mod tests {
         assert!(!labels.iter().any(|(s,_)|s.contains("通过设备 ID 和验证码连接")||s=="设备验证码"||s.contains("官方 UU 客户端连接本机")));
     }
     #[test]
+    fn generated_device_page_follows_host_surface_palette_in_both_themes() {
+        for theme in [egui::Theme::Dark,egui::Theme::Light] {
+            let mut owned=owned();let ctx=egui::Context::default();ctx.set_theme(theme);uu_plugin_sdk::theme::apply(&ctx);
+            let input=||egui::RawInput{screen_rect:Some(egui::Rect::from_min_size(egui::Pos2::ZERO,egui::vec2(1000.,800.))),..Default::default()};
+            let _=ctx.run(input(),|ctx|{owned.ui.show_navigation(ctx,"devices");});
+            let output=ctx.run(input(),|ctx|{owned.ui.show_navigation(ctx,"devices");});
+            let palette=*uu_plugin_sdk::theme::palette(&ctx.style().visuals);
+            fn surfaces(shape:&egui::Shape,out:&mut Vec<egui::Color32>) {
+                match shape {egui::Shape::Rect(rect)=>out.push(rect.fill),egui::Shape::Vec(shapes)=>for shape in shapes{surfaces(shape,out)},_=>{}}
+            }
+            let mut fills=Vec::new();for shape in &output.shapes {surfaces(&shape.shape,&mut fills);}
+            assert!(fills.contains(&palette.base));assert!(fills.contains(&palette.sidebar));
+            if theme==egui::Theme::Dark {assert!(!fills.contains(&egui::Color32::WHITE),"dark host must not get an opaque white plugin panel");}
+            assert_eq!(owned.ui.selected,Some(0));assert!(owned.ui.actions.is_empty());
+        }
+    }
+    #[test]
     fn module_settings_and_server_permissions_are_visible_without_disclosure() {
         let mut owned=owned();let ctx=egui::Context::default();uu_plugin_sdk::theme::apply(&ctx);
         let input=||egui::RawInput{screen_rect:Some(egui::Rect::from_min_size(egui::Pos2::ZERO,egui::vec2(1100.,1000.))),..Default::default()};
