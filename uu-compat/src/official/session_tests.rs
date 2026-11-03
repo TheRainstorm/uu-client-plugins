@@ -53,11 +53,13 @@ async fn official_generated_media_crosses_turn_with_no_direct_candidates() {
     media.pc.close().await.unwrap();turn.close().await;
 }
 #[tokio::test(flavor="multi_thread",worker_threads=2)]
-async fn official_generated_h264_echo_quality_and_stop_release_the_shared_slot(){
+async fn official_generated_media_runs_beyond_four_leases_and_releases_only_its_own(){
     crate::install_crypto_provider();
     let gate=Arc::new(SessionGate::default());
+    let leases:Vec<_>=(0..6).map(|_|gate.claim("native-fixture").unwrap()).collect();
     for cancel in [false,true] {
         let stats=Arc::new(uu_core::media::MediaStats::default());
+        let _=stats.decoder_preference.set(uu_core::media::DecoderKind::Software);
         stats.audio.output_enabled.store(false,Ordering::Release);
         let (frames,_)=uu_core::media::frame_channel();
         let media=crate::media::ControllerMedia::new_with_frames(vec![],Some(frames),Some(stats.clone())).await.unwrap();
@@ -67,13 +69,17 @@ async fn official_generated_h264_echo_quality_and_stop_release_the_shared_slot()
         let(stop,receiver)=watch::channel(false);
         let mut host_context=context(gate.clone(),receiver);
         host_context.sharing.audio=Some(uu_media::audio_capture::Source::Synthetic);
-        let host=tokio::spawn(session(connection,true,Instant::now()).serve(host_context));
+        let mut host=tokio::spawn(session(connection,true,Instant::now()).serve(host_context));
         let answer=timeout(Duration::from_secs(10),rx.recv()).await.unwrap().unwrap();
         assert!(!answer["sdp"].as_str().unwrap().contains("x-eclipse-"));
         media.set_answer(answer["sdp"].as_str().unwrap()).await.unwrap();
-        timeout(Duration::from_secs(10),async {while stats.decoded_total.load(Ordering::Relaxed)<10 {tokio::time::sleep(Duration::from_millis(20)).await;}}).await.unwrap();
-        assert_eq!(gate.sessions().len(),1);
-        assert_eq!(gate.active_peer().as_deref(),Some("uu:generated-controller"));
+        let ready=timeout(Duration::from_secs(10),async {while stats.decoded_total.load(Ordering::Relaxed)<10 {
+            if host.is_finished(){panic!("official host ended before video: {:?}",(&mut host).await);}
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }}).await;
+        assert!(ready.is_ok(),"video timed out: decoded={}, errors={}",stats.decoded_total.load(Ordering::Relaxed),stats.errors.load(Ordering::Relaxed));
+        assert_eq!(gate.sessions().len(),leases.len()+1);
+        assert!(gate.sessions().iter().any(|(_,peer)|peer=="uu:generated-controller"));
         assert!(gate.administration.lock().unwrap().is_none());
         timeout(Duration::from_secs(3),async {while stats.audio.decoded_samples.load(Ordering::Relaxed)==0 {tokio::time::sleep(Duration::from_millis(20)).await;}}).await.unwrap();
         let before=stats.decoded_total.load(Ordering::Relaxed);
@@ -85,21 +91,19 @@ async fn official_generated_h264_echo_quality_and_stop_release_the_shared_slot()
         timeout(Duration::from_secs(5),async {while stats.decoded_total.load(Ordering::Relaxed)<before+10||stats.settings_response.load(Ordering::Acquire)!=(902<<1|1) {tokio::time::sleep(Duration::from_millis(20)).await;}}).await.unwrap();
         if cancel {host.abort();assert!(host.await.unwrap_err().is_cancelled());}
         else {stop.send_replace(true);let report=timeout(Duration::from_secs(6),host).await.unwrap().unwrap().unwrap();assert!(report.sent>=10);assert_eq!(report.input_events,0);}
-        timeout(Duration::from_secs(2),async {while !gate.sessions().is_empty() {tokio::time::sleep(Duration::from_millis(10)).await;}}).await.unwrap();
+        timeout(Duration::from_secs(2),async {while gate.sessions().len()!=leases.len() {tokio::time::sleep(Duration::from_millis(10)).await;}}).await.unwrap();
         assert!(closed.load(Ordering::Acquire));
         media.pc.close().await.unwrap();drop(tx);
     }
+    assert!(leases.iter().all(|lease| !*lease.stopped().borrow()));
+    drop(leases);assert!(gate.sessions().is_empty());
 }
 #[tokio::test]
-async fn disabled_expired_or_full_host_rejects_before_reading_an_offer(){
+async fn disabled_or_expired_host_rejects_before_reading_an_offer(){
     let gate=Arc::new(SessionGate::default());let(_stop,receiver)=watch::channel(false);
     for (enabled,created) in [(false,Instant::now()),(true,Instant::now()-Duration::from_secs(31))] {
         let(c,_tx,_rx,closed)=connection();
         assert!(timeout(Duration::from_millis(200),session(c,enabled,created).serve(context(gate.clone(),receiver.clone()))).await.unwrap().is_err());
         assert!(closed.load(Ordering::Acquire));assert!(gate.sessions().is_empty());
     }
-    let leases:Vec<_>=(0..uu_core::shared_host::MAX_SESSIONS).map(|_|gate.claim("native-fixture").unwrap()).collect();
-    let(c,_tx,_rx,closed)=connection();
-    assert!(timeout(Duration::from_millis(200),session(c,true,Instant::now()).serve(context(gate.clone(),receiver))).await.unwrap().is_err());
-    assert!(closed.load(Ordering::Acquire));assert_eq!(gate.sessions().len(),leases.len());drop(leases);
 }

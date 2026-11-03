@@ -3,6 +3,8 @@ use super::*;
 use std::collections::HashMap;
 use tokio::sync::mpsc;
 
+// Backpressure before the host consumes a request, not an active media limit.
+const INCOMING_QUEUE_CAPACITY: usize = 4;
 pub struct Listener { incoming: mpsc::Receiver<uu_core::plugins::Incoming>, task: tokio::task::JoinHandle<()> }
 struct Route { target: String, ctrl: String, incoming: mpsc::Sender<Value>,official:bool }
 struct Pending {
@@ -52,7 +54,7 @@ impl Listener {
     }
     fn start(mut socket:SocketIo,development_relay:bool,settings:crate::official::Settings,native:bool,admission:fn(bool)->bool)->Self {
         let (outgoing,mut requests)=mpsc::channel(128);
-        let (accepted,incoming)=mpsc::channel(crate::shared_host::MAX_SESSIONS);
+        let (accepted,incoming)=mpsc::channel(INCOMING_QUEUE_CAPACITY);
         let task=tokio::spawn(async move {
             let mut pending:Vec<Pending>=Vec::new();
             let mut sessions=HashMap::<String,Route>::new();
@@ -117,17 +119,13 @@ impl Listener {
                                 if !settings.enabled||request.options.is_none()||!request.official_bound(&session,target,ctrl){continue;}
                                 (json!({"type":"offer","sdp":sdp}),true)
                             };
-                            if sessions.len()>=crate::shared_host::MAX_SESSIONS {
-                                let _=socket.emit("release",json!({"app_control_id":ctrl,"control_id":ctrl,"ice_id":session}),&[]).await;
-                                continue;
-                            }
                             let (send,receive)=mpsc::channel(64);let _=send.try_send(first);
                             sessions.insert(session.clone(),Route{target:target.into(),ctrl:ctrl.into(),incoming:send,official});
-                            let connection=Connection{session:session.clone(),ice:request.ice,transport:Box::new(Routed{session,outgoing:outgoing.clone(),incoming:receive,closed:false})};
+                            let connection=Connection{session:session.clone(),ice:request.ice,transport:Box::new(Routed{session:session.clone(),outgoing:outgoing.clone(),incoming:receive,closed:false})};
                             let incoming=if official {
                                 uu_core::plugins::Incoming::Protocol(Box::new(crate::official::Session::new(connection,request.options.unwrap(),settings.clone(),target.to_owned(),request.created)))
                             }else{uu_core::plugins::Incoming::Native(connection)};
-                            if accepted.try_send(incoming).is_err(){continue;}
+                            if accepted.try_send(incoming).is_err(){sessions.remove(&session);continue;}
                         }else if matches!(event.as_str(),"released"|"left"|"leave"|"fail") {
                             let field=|key|body.get(key).or_else(||header.get(key)).and_then(Value::as_str).filter(|s|!s.is_empty());
                             let session=field("ice_id");
@@ -236,6 +234,21 @@ mod tests {
             }
             listener.close().await;drop(commands);timeout(Duration::from_secs(2),server).await.unwrap().unwrap();
         }}
+    }
+    #[tokio::test(flavor="multi_thread",worker_threads=2)]
+    async fn room_routes_more_than_four_consumed_sessions_without_expanding_pending_queues() {
+        let(socket,commands,_responses,server)=fixture().await;
+        let mut listener=Listener::from_socket(socket,false);
+        let mut sessions=Vec::new();
+        for n in 1..=6 {
+            commands.send(event("be-controlled",json!({"data":{"ice_id":format!("session-{n}")},"iceServers":[]}))).await.unwrap();
+            commands.send(event("soac",json!({"client_id":format!("client-{n}"),"data":{"ice_id":format!("session-{n}"),"app_control_id":format!("control-{n}"),"type":"offer","sdp":pack_sdp(envelope(n)).unwrap()}}))).await.unwrap();
+            let mut connection=timeout(Duration::from_secs(2),listener.accept()).await.unwrap().unwrap();
+            assert_eq!(connection.transport.receive().await.unwrap()["n"],n);
+            sessions.push(connection);
+        }
+        for connection in &mut sessions {connection.transport.close().await;}
+        listener.close().await;drop(commands);timeout(Duration::from_secs(2),server).await.unwrap().unwrap();
     }
     #[tokio::test(flavor="multi_thread",worker_threads=2)]
     async fn room_routes_two_sessions_and_releasing_one_keeps_the_other_socket_alive() {
