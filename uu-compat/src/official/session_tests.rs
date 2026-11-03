@@ -40,11 +40,14 @@ async fn official_generated_media_crosses_turn_with_no_direct_candidates() {
     let(mut connection,tx,mut rx,closed)=connection();connection.ice=turn.ice();
     tx.send(serde_json::json!({"type":"offer","sdp":offer})).await.unwrap();
     let(stop,receiver)=watch::channel(false);let gate=Arc::new(SessionGate::default());
-    let host=tokio::spawn(session(connection,true,Instant::now()).serve(context(gate.clone(),receiver)));
+    let mut host=tokio::spawn(session(connection,true,Instant::now()).serve(context(gate.clone(),receiver)));
     let answer=timeout(Duration::from_secs(12),rx.recv()).await.unwrap().unwrap();
     crate::relay_tests::relay_only(answer["sdp"].as_str().unwrap());
     media.set_answer(answer["sdp"].as_str().unwrap()).await.unwrap();
-    timeout(Duration::from_secs(12),async {while stats.decoded_total.load(Ordering::Acquire)<10 {assert!(!host.is_finished());tokio::time::sleep(Duration::from_millis(20)).await;}}).await.unwrap();
+    timeout(Duration::from_secs(12),async {while stats.decoded_total.load(Ordering::Acquire)<10 {
+        if host.is_finished(){panic!("official relay host ended before video: {:?}",(&mut host).await);}
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }}).await.expect("relay video did not produce ten decoded frames");
     let pair=media.pc.sctp().transport().ice_transport().get_selected_candidate_pair().await.unwrap();
     use webrtc::ice_transport::ice_candidate_type::RTCIceCandidateType;
     assert_eq!(pair.local().typ,RTCIceCandidateType::Relay);assert_eq!(pair.remote().typ,RTCIceCandidateType::Relay);
