@@ -1,20 +1,86 @@
-# Eclipse UU runtime plugin
+# Eclipse UU 兼容插件
 
-This repository builds and distributes the optional UU native library. The main Eclipse application has no dependency on this repository and ships without this plugin.
+为 [Eclipse](https://github.com/TheRainstorm/eclipse) 提供可选的 UU 账号、设备列表、连接服务和协议兼容功能。本仓库独立构建和发布插件，并非网易 UU 远程官方客户端。Eclipse 的原生 IP 直连和自建连接服务不需要安装本插件。
 
-Download a plugin ZIP matching your application's SDK, extract it at the application directory, rescan in Settings → Plugins, and explicitly enable it. New and upgraded installations default to disabled. The archive creates `plugins/uu/plugin.json` and the plugin DLL. It contains no account state and no application executables.
+## 下载和安装
 
-The plugin owns QR login, account devices, favorites, assistance requests, rendezvous, the UU controller protocol and the optional official-client host adapter. Settings and accounts live under the application's data directory in `plugins/uu/`. Legacy account migration occurs only after explicit enablement, preserving originals. Official relay defaults off; the supported optional relay transport is TURN/UDP. TURN/TCP and TURN/TLS are not implemented. Official mobile desktop interoperability still requires real-device acceptance; generated media tests do not establish it.
+1. 安装 Eclipse 主程序，再到本仓库的 [Releases](https://github.com/TheRainstorm/uu-client-plugins/releases) 获取与该主程序构建、操作系统匹配的插件 ZIP。
+2. **核对 SDK，而不只看版本号。** 主程序目录 `version.json` 的 `plugin_sdk_id` 必须与插件包 `plugins/uu/plugin.json` 的 `sdk_id` 完全相同。插件发布说明若未提供匹配构建，不能直接用另一个版本的“最新插件”代替。
+3. 完全退出正在运行的 Eclipse 客户端，将 ZIP **解压到主程序目录**。压缩包已经带有 `plugins/uu/`，不要再解压到 `plugins/` 内造成双层目录。
+4. 重开 Eclipse，进入“应用设置 → 插件”，点击“重新扫描插件”，找到 `UU compatibility`（插件 ID 为 `uu`），手动启用。
 
-## Modules
+Windows 安装后的结构应为：
 
-After enabling the plugin, select its three modules independently in Settings → Plugins. The compatibility client and account connection service default on; the experimental compatibility server defaults off. Explicit module choices persist across restarts and upgrades. The client adds the “UU compatibility client” toolbar entry, the account service supplies native Eclipse rendezvous and account settings, and the experimental server exposes its permissions directly in Service management. Their shared transport does not publish a disabled native entrance. Disabling a module preserves existing streams; restart hosting to apply changed entrance settings and permissions.
+```text
+<Eclipse 程序目录>/
+├── version.json
+└── plugins/
+    └── uu/
+        ├── plugin.json
+        ├── uu_compat.dll
+        ├── README.md
+        └── …许可与依赖声明
+```
 
-The compatibility server module controls official UU connection admission. The legacy enable flag in `host.json` does not enable that module; control, audio and clipboard permissions remain in that file. Remote assistance contains only the official device ID and verification-code flow. Native pairing stays in Eclipse's own device and service pages.
+Linux 构建使用 `libuu_compat.so`，实际库名以 `plugin.json` 的 `library` 为准。插件 ZIP 不包含主程序、账号资料或替代 SDK 运行库；请保留主程序完整包自带的 SDK 和编译器运行库。
 
-## Build
+这是精确构建匹配的原生 SDK，不承诺稳定的 Rust 二进制 ABI。主程序升级后需重新检查插件是否匹配。新安装、升级及缺少启用记录的插件默认关闭，以插件页的实际状态为准。
 
-Read `engine-sdk.json`, check out its exact engine revision, and place this repository at `<engine>/plugins`. It is a separate Cargo workspace with its own lock. Use the pinned Rust toolchain and matching target/features; this native SDK does not promise a stable Rust ABI.
+## 选择需要的模块
+
+启用插件后，在“UU 插件设置”中分别选择模块。下表的默认值指插件已经手动启用之后：
+
+| 模块 | 默认 | 用途与入口 |
+| --- | --- | --- |
+| UU 兼容客户端 | 开启 | 增加“UU 兼容客户端”入口，登录 UU 账号后查看官方设备，使用 UU 协议连接设备或发起远程协助。 |
+| UU 账号连接服务 | 开启 | 在连接服务中提供 UU 账号登录和设备寻址，让 Eclipse 设备通过该服务建立原生连接；Eclipse 设备配对仍单独进行。 |
+| UU 兼容服务器（实验性） | 关闭 | 允许官方 UU 客户端连接本机 Eclipse 主机；在服务管理中设置键鼠、系统声音和文本剪贴板许可。 |
+
+只想用 Eclipse 连接已有官方设备时，可以先使用“UU 兼容客户端”；只有需要官方客户端访问本机时，才开启实验性兼容服务器。模块选项会保存，关闭模块后不再提供相应的新入口，已有串流继续使用建立连接时的状态。
+
+### 登录与连接
+
+打开“UU 兼容客户端”，点击“扫码登录”，按二维码提示完成 UU 账号登录，然后选择设备连接。需要协助他人时，在插件的远程协助页输入对方的**官方设备 ID 和验证码**。
+
+使用“UU 账号连接服务”时，在对应连接服务卡片中登录；本机 UU 名称自动使用电脑名加 `-Eclipse`，便于和官方客户端区分。要让其他设备连接这台 Eclipse，还需在主机的连接服务中启用该入口并启动共享。
+
+UU 账号和 Eclipse 设备授权是两件事：
+
+- 账号登录用于获取 UU 设备列表和建立连接，不会自动授予 Eclipse 原生控制权限。
+- 两台 Eclipse 建立原生连接时，仍使用 Eclipse 的设备配对与主机权限规则；在主程序的设备、配对设置中操作。
+- 官方远程协助验证码仅用于该次兼容连接，不保存为 Eclipse 原生设备授权。
+- 实验性兼容服务器接受的是 UU 账号允许的连接；它的键鼠、声音和剪贴板许可仍受本机服务限制，不授予 Eclipse 本机管理权限。
+
+### Windows 后台服务何时生效
+
+仅用兼容客户端连接其他设备，不需要为了插件另外安装一套后台服务。共享本机时，继续使用 Eclipse 原有的后台服务：主程序同步已启用且 SDK 匹配的连接插件、模块选项和清单声明的数据。
+
+修改主机入口或兼容服务器权限后，保存设置并按界面提示重启服务；完整程序更新和插件同步会等待没有串流及显示器操作的空闲阶段。部署代码如需 Windows 管理员授权，按系统提示确认。无需另设“后台启用”开关，也不要手工覆盖正在运行的服务文件。
+
+模块改动不会追溯更改已有串流的准入权限。需要验证新的主机权限时，应在服务应用设置后重新连接。
+
+## 网络、兼容范围与数据
+
+“允许官方中转”默认关闭，默认只通过 UU 连接服务尝试点对点连接。开启后才会在无法 P2P 时尝试官方中转；当前实现支持 TURN/UDP，不支持 TURN/TCP 或 TURN/TLS。这与 Eclipse 自建连接服务的中转配置相互独立。
+
+官方协议兼容仍在开发，不能保证覆盖所有官方客户端版本、手机或平台组合。特别是实验性兼容服务器与官方手机的桌面互通，需要对应版本的真实设备验收；生成媒体、协议测试或编译通过都不能代替这一点。
+
+插件账号和配置保存在 Eclipse 应用数据目录下的 `plugins/uu/`；它与程序目录中放动态库的 `plugins/uu/` 用途不同。旧账号、设备路由等资料只在手动启用插件后迁移，并保留原件。
+
+停用插件会阻止新请求，不会卸载仍被已有会话使用的代码。更新或移除插件动态库前，请完全退出客户端；后台仍在使用时，通过服务管理先停止对应共享，再按界面提示更新。
+
+## 常见问题
+
+- **插件页提示“不匹配”：**重新核对两个 SDK 指纹，并下载匹配的平台构建；不要修改清单中的 `sdk_id` 来绕过校验。
+- **扫描不到插件：**检查是否直接得到 `plugins/uu/plugin.json`，而不是 `plugins/plugins/uu/` 或带额外压缩包目录的一层路径。
+- **启用后看不到某个入口：**检查“UU 插件设置”对应模块是否开启；主机入口还需要服务应用设置。
+- **登录成功但原生连接仍要求配对：**这是正常流程；UU 账号寻址不能代替 Eclipse 设备配对。
+
+## 从源码构建
+
+开发者先读取 [engine-sdk.json](engine-sdk.json)，检出其中固定的 Eclipse 引擎提交，再将本仓库放在 `<engine>/plugins`。插件使用独立的 Cargo 工作区和依赖锁；Rust 工具链、目标平台、特性及编译选项必须与主程序匹配。
+
+在引擎目录执行：
 
 ```sh
 cd plugins
@@ -22,6 +88,4 @@ cargo test --release --locked -p uu-compat --tests
 python3 tools/package.py --target x86_64-pc-windows-gnu
 ```
 
-The main application provides the shared engine SDK and compiler runtime. Do not replace them with a plugin build's copies. Loaded libraries stay mapped until application exit; disablement prevents new requests and does not unload live session code.
-
-Plugin releases are published only from this repository. The main application's Release contains only its complete main package. License notices cover the plugin and its engine dependencies; splitting repositories does not remove third-party obligations.
+打包工具校验引擎固定提交、共享 SDK 身份和真实插件加载，不会用插件构建产物替换主程序的运行库。插件独立在本仓库发布；主程序正式 Release 提供主程序完整包，插件单独下载。许可与第三方义务见 [LICENSE](LICENSE) 和 [依赖许可说明](docs/dependency-licenses.md)。
