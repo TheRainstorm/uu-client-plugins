@@ -173,10 +173,14 @@ mod tests {
     #[test]
     fn generated_device_page_follows_host_surface_palette_in_both_themes() {
         for theme in [egui::Theme::Dark,egui::Theme::Light] {
-            let mut owned=owned();let ctx=egui::Context::default();ctx.set_theme(theme);uu_plugin_sdk::theme::apply(&ctx);
+            let mut owned=owned();let ctx=egui::Context::default();ctx.set_theme(theme);
+            // The default SkyBlue family is intentionally light-only. Use a
+            // dual-mode host family so the dark iteration tests real dark UI.
+            uu_plugin_sdk::theme::apply_color_theme(&ctx,uu_plugin_sdk::theme::ColorTheme::LightBlue);
             let input=||egui::RawInput{screen_rect:Some(egui::Rect::from_min_size(egui::Pos2::ZERO,egui::vec2(1000.,800.))),..Default::default()};
             let _=ctx.run(input(),|ctx|{owned.ui.show_navigation(ctx,"devices");});
             let output=ctx.run(input(),|ctx|{owned.ui.show_navigation(ctx,"devices");});
+            assert_eq!(ctx.style().visuals.dark_mode,theme==egui::Theme::Dark,"fixture must use the requested host mode");
             let palette=*uu_plugin_sdk::theme::palette(&ctx.style().visuals);
             fn surfaces(shape:&egui::Shape,out:&mut Vec<egui::Color32>) {
                 match shape {egui::Shape::Rect(rect)=>out.push(rect.fill),egui::Shape::Vec(shapes)=>for shape in shapes{surfaces(shape,out)},_=>{}}
