@@ -138,6 +138,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "animal-island-ui"
+version = "0.1.0"
+dependencies = [
+ "egui",
+]
+
+[[package]]
 name = "annotate-snippets"
 version = "0.11.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2358,12 +2365,23 @@ checksum = "85ab80394333c02fe689eaf900ab500fbd0c2213da414687ebf995a65d5a6104"
 dependencies = [
  "bytemuck",
  "byteorder-lite",
+ "image-webp",
  "moxcms",
  "num-traits",
  "png",
  "tiff",
  "zune-core",
  "zune-jpeg",
+]
+
+[[package]]
+name = "image-webp"
+version = "0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "525e9ff3e1a4be2fbea1fdf0e98686a6d98b4d8f937e1bf7402245af1909e8c3"
+dependencies = [
+ "byteorder-lite",
+ "quick-error",
 ]
 
 [[package]]
@@ -3431,7 +3449,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7d8fae84b431384b68627d0f9b3b1245fcf9f46f6c0e3dc902e9dce64edd1967"
 dependencies = [
  "libc",
- "windows-sys 0.45.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5213,7 +5231,7 @@ checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
 
 [[package]]
 name = "uu-capture"
-version = "0.21.1"
+version = "0.24.7"
 dependencies = [
  "anyhow",
  "ashpd",
@@ -5278,7 +5296,7 @@ dependencies = [
 
 [[package]]
 name = "uu-core"
-version = "0.21.1"
+version = "0.24.7"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5293,6 +5311,7 @@ dependencies = [
  "if-addrs",
  "rand 0.8.8",
  "rcgen",
+ "reqwest",
  "ring",
  "rustls",
  "rustls-pki-types",
@@ -5321,7 +5340,7 @@ dependencies = [
 
 [[package]]
 name = "uu-i18n"
-version = "0.21.1"
+version = "0.24.7"
 dependencies = [
  "serde",
  "serde_json",
@@ -5330,7 +5349,7 @@ dependencies = [
 
 [[package]]
 name = "uu-i18n-macros"
-version = "0.21.1"
+version = "0.24.7"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -5340,7 +5359,7 @@ dependencies = [
 
 [[package]]
 name = "uu-input"
-version = "0.21.1"
+version = "0.24.7"
 dependencies = [
  "anyhow",
  "cc",
@@ -5362,7 +5381,7 @@ dependencies = [
 
 [[package]]
 name = "uu-media"
-version = "0.21.1"
+version = "0.24.7"
 dependencies = [
  "anyhow",
  "audiopus_sys",
@@ -5382,12 +5401,14 @@ dependencies = [
  "tracing",
  "uu-proto",
  "windows 0.62.2",
+ "windows-core 0.62.2",
 ]
 
 [[package]]
 name = "uu-plugin-sdk"
-version = "0.21.1"
+version = "0.24.7"
 dependencies = [
+ "animal-island-ui",
  "anyhow",
  "arboard",
  "eframe",
@@ -5397,6 +5418,7 @@ dependencies = [
  "image",
  "libloading",
  "regex-automata",
+ "reqwest",
  "serde",
  "serde_json",
  "sha2",
@@ -5414,7 +5436,7 @@ dependencies = [
 
 [[package]]
 name = "uu-proto"
-version = "0.21.1"
+version = "0.24.7"
 dependencies = [
  "base64 0.22.1",
  "bytes",

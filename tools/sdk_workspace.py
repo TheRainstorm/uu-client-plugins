@@ -36,6 +36,13 @@ def prepare(engine,plugin,target=None):
     workspace.mkdir(parents=True)
     for name in ['crates','vendor','assets','.cargo']:
         shutil.copytree(engine/name,workspace/name,ignore=shutil.ignore_patterns('target','__pycache__'))
+    # SDK workspaces can add members outside crates/, such as first-party
+    # extensions. Mirror the declared members without editing the engine tree.
+    for member in tomllib.loads((engine/'Cargo.toml').read_text())['workspace']['members']:
+        for source in engine.glob(member):
+            destination=workspace/source.relative_to(engine)
+            if not destination.exists():
+                shutil.copytree(source,destination,ignore=shutil.ignore_patterns('target','__pycache__'))
     manifest=(engine/'Cargo.toml').read_text().replace('members = [','members = [\n    "plugins/uu-compat",',1).replace('exclude = ["plugins", ','exclude = [')
     (workspace/'Cargo.toml').write_text(manifest)
     (workspace/'Cargo.lock').write_text(workspace_lock(engine,plugin,manifest))

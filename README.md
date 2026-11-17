@@ -1,10 +1,14 @@
 # Eclipse UU 兼容插件
 
-为 [Eclipse](https://github.com/TheRainstorm/eclipse) 提供可选的 UU 账号、设备列表、连接服务和协议兼容功能。本仓库独立构建和发布插件，并非网易 UU 远程官方客户端。Eclipse 的原生 IP 直连和自建连接服务不需要安装本插件。
+为 [Eclipse](https://github.com/TheRainstorm/eclipse) 提供可选的 UU 账号、设备列表、连接服务和协议兼容功能。本仓库独立维护源码，并非网易 UU 远程官方客户端。Eclipse 的原生 IP 直连和自建连接服务不需要启用本插件。
 
-## 下载和安装
+新的 Eclipse 完整包已包含匹配 SDK 的 UU 插件，安装后直接进入“应用设置 → 插件”启用 `UU compatibility`（插件 ID 为 `uu`），再按下文选择模块即可。插件默认关闭；已有的启用偏好按当前设置保留。无需为了使用插件再次手动下载。
 
-1. 安装 Eclipse 主程序，再到本仓库的 [Releases](https://github.com/TheRainstorm/uu-client-plugins/releases) 获取与该主程序构建、操作系统匹配的插件 ZIP。
+## 单独下载或更新
+
+以下步骤适用于单独更新插件，或安装未包含插件的旧主程序包：
+
+1. 到本仓库的 [Releases](https://github.com/TheRainstorm/uu-client-plugins/releases) 获取与已安装主程序构建、操作系统匹配的插件 ZIP。
 2. **核对 SDK，而不只看版本号。** 主程序目录 `version.json` 的 `plugin_sdk_id` 必须与插件包 `plugins/uu/plugin.json` 的 `sdk_id` 完全相同。插件发布说明若未提供匹配构建，不能直接用另一个版本的“最新插件”代替。
 3. 完全退出正在运行的 Eclipse 客户端，将 ZIP **解压到主程序目录**。压缩包已经带有 `plugins/uu/`，不要再解压到 `plugins/` 内造成双层目录。
 4. 重开 Eclipse，进入“应用设置 → 插件”，点击“重新扫描插件”，找到 `UU compatibility`（插件 ID 为 `uu`），手动启用。
@@ -88,4 +92,4 @@ cargo test --release --locked -p uu-compat --tests
 python3 tools/package.py --target x86_64-pc-windows-gnu
 ```
 
-打包工具校验引擎固定提交、共享 SDK 身份和真实插件加载，不会用插件构建产物替换主程序的运行库。插件独立在本仓库发布；主程序正式 Release 提供主程序完整包，插件单独下载。许可与第三方义务见 [LICENSE](LICENSE) 和 [依赖许可说明](docs/dependency-licenses.md)。
+独立打包工具校验引擎固定提交、共享 SDK 身份和真实插件加载，不会用插件构建产物替换主程序的运行库。Eclipse 完整包从本仓库固定的插件提交取源码，并针对该次主程序 SDK 重编译；独立插件发布仍绑定 `engine-sdk.json` 中的引擎版本，不能直接替换任意主程序的插件。许可与第三方义务见 [LICENSE](LICENSE) 和 [依赖许可说明](docs/dependency-licenses.md)。
